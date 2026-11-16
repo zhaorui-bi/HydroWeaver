@@ -2717,10 +2717,10 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package--hono-node-server-2.1.3-3cabf8f7607c0754",
+      "SPDXID": "SPDXRef-Package--hono-node-server-2.1.8-4431b452cfbb0a9d",
       "name": "@hono/node-server",
-      "versionInfo": "2.1.3",
-      "downloadLocation": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.3.tgz",
+      "versionInfo": "2.1.8",
+      "downloadLocation": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.8.tgz",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "MIT",
@@ -2729,13 +2729,13 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/%40hono/node-server@2.1.3"
+          "referenceLocator": "pkg:npm/%40hono/node-server@2.1.8"
         }
       ],
       "checksums": [
         {
           "algorithm": "SHA512",
-          "checksumValue": "4c0fff9d632a3e16df75f9de00293ab796bd7aa6d2f6500110fc8a9f4ff16536a1dc7dd4d9769583ce6b245974fc5ca2b74239e766031e05c65527f71b0a9b53"
+          "checksumValue": "8dd7fb14787a0359738e91c7414831b20d86784476bcc7ad9c039f78072dcdca258ba8da9a52be340c0be83b2be45977052ded61443309db598d4f10c6fedb10"
         }
       ]
     },
@@ -15125,10 +15125,10 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-hono-4.13.13-e62bf0218600b54d",
+      "SPDXID": "SPDXRef-Package-hono-4.13.18-3e764564f50cbeb3",
       "name": "hono",
-      "versionInfo": "4.13.13",
-      "downloadLocation": "https://registry.npmjs.org/hono/-/hono-4.13.13.tgz",
+      "versionInfo": "4.13.18",
+      "downloadLocation": "https://registry.npmjs.org/hono/-/hono-4.13.18.tgz",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "MIT",
@@ -15137,13 +15137,13 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/hono@4.13.13"
+          "referenceLocator": "pkg:npm/hono@4.13.18"
         }
       ],
       "checksums": [
         {
           "algorithm": "SHA512",
-          "checksumValue": "090e3a53466400699b4ffe14c5dcf3189a5a70fd8878a818e1ae7fb4e23d00005ba4e31f2bbdfdc1f0d79afd6eb0293edd190a8f5850cb8fdf8e18b06b6c65ac"
+          "checksumValue": "1fdabf1355e2cda5acb49c545bcf357662f1123fadfd3ac61a7cb120d926e3eb0ad2a530b0cb45768d81588f55b377084b5f4c53a6fa8828a3a14a047f87f70c"
         }
       ]
     },
@@ -27120,7 +27120,7 @@
     {
       "spdxElementId": "SPDXRef-OpenAqua-Harness",
       "relationshipType": "CONTAINS",
-      "relatedSpdxElement": "SPDXRef-Package--hono-node-server-2.1.3-3cabf8f7607c0754"
+      "relatedSpdxElement": "SPDXRef-Package--hono-node-server-2.1.8-4431b452cfbb0a9d"
     },
     {
       "spdxElementId": "SPDXRef-OpenAqua-Harness",
@@ -29825,7 +29825,7 @@
     {
       "spdxElementId": "SPDXRef-OpenAqua-Harness",
       "relationshipType": "CONTAINS",
-      "relatedSpdxElement": "SPDXRef-Package-hono-4.13.13-e62bf0218600b54d"
+      "relatedSpdxElement": "SPDXRef-Package-hono-4.13.18-3e764564f50cbeb3"
     },
     {
       "spdxElementId": "SPDXRef-OpenAqua-Harness",

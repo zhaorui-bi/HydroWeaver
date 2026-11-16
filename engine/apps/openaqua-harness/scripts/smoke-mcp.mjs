@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -101,7 +102,37 @@ try {
   const after = payload(await client.callTool({ name: 'openaqua_job_list', arguments: {} }));
   assert(after.total === 0, 'research registration or status unexpectedly launched a backend job');
 
-  process.stdout.write('MCP smoke: 24 tools, annotations, research registration/recovery/idempotence, and job dispatch verified\n');
+  const launchDir = path.join(scratch, 'old-launch');
+  mkdirSync(launchDir);
+  const cli = path.join(packageRoot, 'dist', 'cli.mjs');
+  const { OPENAQUA_JOBS_DIR: _ignored, ...baseEnv } = process.env;
+  const sharedEnv = { ...baseEnv, OPENAQUA_HOME: path.join(scratch, 'home'), OPENAQUA_WORKDIR: scratch };
+  const researchRequest = path.join(scratch, 'request.json');
+  writeFileSync(queryFile, JSON.stringify({ source_water: 'groundwater', contaminants: ['arsenic'] }));
+  writeFileSync(researchRequest, JSON.stringify({ ...request, requestId: 'legacy-case' }));
+  function runCli(args, env = sharedEnv) {
+    const result = spawnSync(process.execPath, [cli, 'research', ...args], { cwd: launchDir, env, encoding: 'utf8' });
+    assert(result.status === 0, `CLI failed: ${result.stderr} ${result.stdout}`);
+    return JSON.parse(result.stdout);
+  }
+  const legacy = runCli(['create', '--input', researchRequest], {
+    ...sharedEnv, OPENAQUA_JOBS_DIR: path.join(launchDir, 'openaqua-jobs'),
+  });
+  const migrationTransport = new StdioClientTransport({ command: process.execPath, args: [entry], cwd: launchDir, env: sharedEnv });
+  const migrationClient = new Client({ name: 'openaqua-store-smoke', version: '1.0.0' });
+  try {
+    await migrationClient.connect(migrationTransport);
+    const oldStatus = payload(await migrationClient.callTool({ name: 'openaqua_research_status', arguments: { taskId: legacy.id } }));
+    assert(oldStatus.id === legacy.id && oldStatus.mandate.jobsRoot === legacy.mandate.jobsRoot, 'legacy MCP task was not recovered in place');
+    const current = payload(await migrationClient.callTool({ name: 'openaqua_research_create', arguments: { ...request, requestId: 'current-case' } }));
+    assert(current.mandate.jobsRoot === path.join(scratch, 'openaqua-jobs'), 'new MCP task did not use the workspace store');
+    const cliList = runCli(['list']);
+    assert(cliList.tasks.some((task) => task.id === legacy.id) && cliList.tasks.some((task) => task.id === current.id), 'CLI did not list both stores');
+  } finally {
+    await migrationClient.close().catch(() => undefined);
+  }
+
+  process.stdout.write('MCP smoke: tools, research recovery, and shared CLI/MCP job stores verified\n');
 } finally {
   await client.close().catch(() => undefined);
   rmSync(scratch, { recursive: true, force: true });

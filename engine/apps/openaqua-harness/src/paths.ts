@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -22,6 +22,31 @@ export function resolveOpenAquaHome(env: NodeJS.ProcessEnv = process.env): strin
   return explicit === undefined || explicit === ''
     ? path.join(homedir(), '.openaqua')
     : resolveUserPath(explicit);
+}
+
+export function resolveJobStores(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): { jobsRoot: string; legacyJobsRoot?: string } {
+  if (env['OPENAQUA_JOBS_DIR'] !== undefined) {
+    return { jobsRoot: resolveUserPath(env['OPENAQUA_JOBS_DIR']) };
+  }
+  const workDir = resolveUserPath(env['OPENAQUA_WORKDIR'] ?? cwd);
+  const jobsRoot = path.join(workDir, 'openaqua-jobs');
+  const legacyJobsRoot = path.join(path.resolve(cwd), 'openaqua-jobs');
+  let sameStore = false;
+  try { sameStore = realpathSync(jobsRoot) === realpathSync(legacyJobsRoot); } catch { /* One or both stores do not exist yet. */ }
+  if (sameStore) {
+    if (lstatSync(jobsRoot).isSymbolicLink() || lstatSync(legacyJobsRoot).isSymbolicLink()) {
+      throw new Error('Job store must not be a symbolic link; select its real directory with OPENAQUA_JOBS_DIR.');
+    }
+    return { jobsRoot: legacyJobsRoot };
+  }
+  let sameDirectory = workDir === path.resolve(cwd);
+  if (!sameDirectory) {
+    try { sameDirectory = realpathSync(workDir) === realpathSync(cwd); } catch { /* Preserve both paths when either does not exist yet. */ }
+  }
+  return { jobsRoot, legacyJobsRoot: sameDirectory ? undefined : legacyJobsRoot };
 }
 
 export function findPackageRoot(): string {

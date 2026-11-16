@@ -1,11 +1,10 @@
-import path from 'node:path';
 import process from 'node:process';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-import { packageVersion, resolveOpenAquaHome, resolveUserPath } from '../paths';
+import { packageVersion, resolveJobStores, resolveOpenAquaHome } from '../paths';
 import {
   openAquaToolAnnotations,
   OPENAQUA_TOOLS,
@@ -13,13 +12,11 @@ import {
 } from '../openaqua/tools';
 
 const homeDir = resolveOpenAquaHome();
-const jobsRoot = resolveUserPath(
-  process.env['OPENAQUA_JOBS_DIR'] ?? path.join(process.cwd(), 'openaqua-jobs'),
-);
+const stores = resolveJobStores();
 
 const ctx: ToolContext = {
   homeDir,
-  jobsRoot,
+  ...stores,
   env: process.env,
 };
 

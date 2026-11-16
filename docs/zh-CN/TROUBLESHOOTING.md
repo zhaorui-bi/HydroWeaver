@@ -118,6 +118,13 @@ data/processed/indexes/bm25_index.pkl
 按顺序调用 `openaqua_job_list`、`openaqua_job_status`、
 `openaqua_job_manifest`，再读取有界日志尾部或 `errors` 视图。
 
+新任务默认保存在 `<OPENAQUA_WORKDIR>/openaqua-jobs`；未设置工作区时使用
+`<当前目录>/openaqua-jobs`。命令行和 MCP 也会查找各自当前目录中的旧版 MCP
+任务，并在原位置继续使用。其他历史启动目录无法自动发现：将
+`OPENAQUA_JOBS_DIR` 显式设为对应的 `openaqua-jobs` 目录即可访问。显式设置后
+只使用该目录；如果两个默认目录存在相同 ID，也需要显式选择目录，不要移动或
+覆盖任务记录。
+
 ### 任务成功但没有产物列表
 
 `openaqua_job_artifacts` 只检查显式 `--output` 路径。查看任务状态中的

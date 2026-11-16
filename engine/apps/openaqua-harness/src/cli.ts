@@ -22,13 +22,14 @@ import {
   findPackageRoot,
   packageVersion,
   resolveUserPath,
+  resolveJobStores,
   skillsDir,
 } from './paths';
 import { runWeb } from './server';
 import { runToolsList } from './toolsCmd';
 import { launchTui } from './tui';
 
-const USAGE = `OpenAqua Harness — agentic early-stage water-treatment train design powered by OpenAqua and the Kimi Code engine
+const USAGE = `OpenAqua Harness — an agentic workbench for early-stage water-treatment train design
 
 Usage:
   openaqua                     launch the interactive workbench (full TUI)
@@ -70,8 +71,10 @@ Environment:
   OPENAQUA_PYTHON   Optional Python interpreter for that checkout.
   OPENROUTER_API_KEY Optional key used by OpenAqua parsing/planning/explanation agents.
   OPENAQUA_WORKDIR  Default working directory for research jobs.
-  OPENAQUA_JOBS_DIR Where job records + logs live (default: <cwd>/openaqua-jobs
-                     of the MCP server process).
+  OPENAQUA_JOBS_DIR Explicit job store; disables legacy-store discovery.
+                     Default: <OPENAQUA_WORKDIR or cwd>/openaqua-jobs.
+                     Older MCP jobs in <current cwd>/openaqua-jobs remain accessible;
+                     set OPENAQUA_JOBS_DIR to access other old locations.
 `;
 
 let activeHarness: KimiHarness | undefined;
@@ -141,13 +144,12 @@ async function main(argv: readonly string[]): Promise<void> {
         ? process.env
         : { ...process.env, OPENAQUA_HOME: invocation.homeDir };
       const homeDir = resolveOpenAquaHome(env);
-      const workDir = resolveUserPath(env['OPENAQUA_WORKDIR'] ?? process.cwd());
-      const jobsRoot = resolveUserPath(env['OPENAQUA_JOBS_DIR'] ?? path.join(workDir, 'openaqua-jobs'));
+      const stores = resolveJobStores(env);
       const result = await runResearchCommand(invocation.action, {
         inputFile: invocation.inputFile,
         taskId: invocation.taskId,
         expectedVersion: invocation.expectedVersion,
-      }, { homeDir, jobsRoot, env });
+      }, { homeDir, ...stores, env });
       for (const item of result.content) process.stdout.write(`${item.text}\n`);
       if (result.isError === true) process.exitCode = 1;
       return;

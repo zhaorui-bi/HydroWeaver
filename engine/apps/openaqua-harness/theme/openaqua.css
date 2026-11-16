@@ -1135,6 +1135,25 @@ body .wizard::before {
   outline-offset: 2px;
 }
 
+.oa-welcome-cite-manual {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--tb-line-strong);
+  border-radius: 8px;
+  background: var(--tb-paper-raised);
+  color: var(--tb-ink-muted);
+  font: 12px/1.5 var(--font-ui);
+  resize: vertical;
+}
+
+.oa-welcome-cite-manual:focus-visible {
+  outline: 2px solid var(--tb-action);
+  outline-offset: 2px;
+}
+
 .oa-welcome-cite-btn.is-copied {
   border-color: var(--tb-teal);
   background: var(--tb-teal-wash);

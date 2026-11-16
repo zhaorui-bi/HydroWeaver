@@ -172,8 +172,14 @@ support.
 openaqua_job_list → openaqua_job_status → openaqua_job_manifest
 ```
 
-Then read a bounded log tail or `view: "errors"`. Jobs are stored under
-`OPENAQUA_JOBS_DIR` or `<workdir>/openaqua-jobs`.
+Then read a bounded log tail or `view: "errors"`. New jobs are stored under
+`<OPENAQUA_WORKDIR>/openaqua-jobs` (or `<cwd>/openaqua-jobs` when no workdir is
+set). The CLI and MCP also search the current process's `<cwd>/openaqua-jobs`
+for older MCP jobs and keep those jobs in place. A different historical launch
+directory cannot be discovered automatically: set `OPENAQUA_JOBS_DIR` to its
+`openaqua-jobs` directory to access it. An explicit `OPENAQUA_JOBS_DIR` selects
+only that store. If the same ID occurs in both default stores, select the
+intended store explicitly rather than moving or overwriting either record.
 
 ### A job succeeded but no artifact is listed
 
