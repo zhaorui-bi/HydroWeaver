@@ -25,6 +25,7 @@ import { createEngineeringJobRequest, type JsonValue } from './provenance';
 export interface ResearchContext {
   readonly homeDir?: string;
   readonly jobsRoot: string;
+  readonly legacyJobsRoot?: string;
   readonly env: NodeJS.ProcessEnv;
 }
 
@@ -162,6 +163,7 @@ export function createResearchTask(ctx: ResearchContext, input: {
   const id = `research_${hash(canonical({ requestId, workDir })).slice(0, 24)}`;
   const initialQuerySha256 = hash(canonical(query));
   const requestSha256 = hash(canonical({ requestId, objective, workDir, topK, maxJobs, initialQuerySha256 }));
+  ctx = researchStoreForId(ctx, id);
   const paths = taskPaths(ctx, id, true);
   const release = acquireLock(paths, id);
   try {
@@ -195,6 +197,7 @@ export function createResearchTask(ctx: ResearchContext, input: {
 }
 
 export function getResearchTask(ctx: ResearchContext, taskId: string): ResearchTask | undefined {
+  ctx = researchStoreForId(ctx, taskId);
   return readTask(taskPaths(ctx, taskId, false), ctx);
 }
 
@@ -202,17 +205,26 @@ export function listResearchTasks(ctx: ResearchContext, options: {
   limit?: number; status?: ResearchStatus;
 } = {}): ResearchTask[] {
   const limit = integer(options.limit ?? 20, 'limit', 1, 100);
+  if (ctx.legacyJobsRoot !== undefined) {
+    const currentCtx = { ...ctx, legacyJobsRoot: undefined };
+    const legacyCtx = { ...ctx, jobsRoot: ctx.legacyJobsRoot, legacyJobsRoot: undefined };
+    const ids = new Set(researchTaskIds(currentCtx));
+    for (const id of researchTaskIds(legacyCtx)) {
+      if (ids.has(id) && existsSync(taskPaths(currentCtx, id, false).record) && existsSync(taskPaths(legacyCtx, id, false).record)) {
+        throw new Error('Research task exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      }
+    }
+    const current = listResearchTasks(currentCtx, { ...options, limit: 100 });
+    const legacy = listResearchTasks(legacyCtx, { ...options, limit: 100 });
+    return [...current, ...legacy].toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+  }
   if (options.status !== undefined && !['open', 'running', 'waiting', 'ready', 'cancelled'].includes(options.status)) {
     throw new Error('Invalid research status filter.');
   }
-  const root = path.join(path.resolve(ctx.jobsRoot), 'research');
-  if (!existsSync(root)) return [];
-  regularDirectory(root);
   const tasks: ResearchTask[] = [];
-  const entries = readdirSync(root);
-  if (entries.length > 10_000) throw new Error('Research task inventory exceeds 10000 entries.');
-  for (const id of entries.filter((entry) => TASK_ID.test(entry))) {
-    const task = readTask(taskPaths(ctx, id, false), ctx, true);
+  for (const id of researchTaskIds(ctx)) {
+    const store = storedResearchStore(ctx, id);
+    const task = readTask(taskPaths(store, id, false), store, true);
     if (task !== undefined && (options.status === undefined || task.status === options.status)) tasks.push(task);
   }
   return tasks.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
@@ -221,6 +233,7 @@ export function listResearchTasks(ctx: ResearchContext, options: {
 export async function advanceResearchTask(ctx: ResearchContext, input: {
   taskId: string; expectedVersion?: number;
 }): Promise<ResearchTask> {
+  ctx = researchStoreForId(ctx, input.taskId);
   return mutateTask(ctx, input.taskId, input.expectedVersion, async (task, paths) => {
     if (task.status === 'cancelled') return task;
     if (task.status === 'ready') {
@@ -274,6 +287,7 @@ export async function respondResearchTask(ctx: ResearchContext, input: {
 }): Promise<ResearchTask> {
   const reason = text(input.reason, 'reason', 4_000);
   integer(input.expectedVersion, 'expectedVersion', 1, Number.MAX_SAFE_INTEGER);
+  ctx = researchStoreForId(ctx, input.taskId);
   return mutateTask(ctx, input.taskId, input.expectedVersion, async (task, paths) => {
     if (task.status === 'ready' || task.status === 'cancelled') throw new Error('A closed research task cannot accept responses.');
     const item = task.attention.find((entry) => entry.id === input.attentionId && entry.status === 'open');
@@ -325,6 +339,7 @@ export async function cancelResearchTask(ctx: ResearchContext, input: {
   taskId: string; expectedVersion?: number; reason: string;
 }): Promise<ResearchTask> {
   const reason = text(input.reason, 'reason', 4_000);
+  ctx = researchStoreForId(ctx, input.taskId);
   return mutateTask(ctx, input.taskId, input.expectedVersion, async (task, paths) => {
     if (task.status === 'cancelled') return task;
     if (task.status === 'ready') throw new Error('A ready research task has no execution to cancel.');
@@ -621,6 +636,38 @@ function scientificConfiguration(identity: Record<string, unknown>, env: NodeJS.
   }
   result['environment_overrides'] = overrides;
   return result;
+}
+
+function researchTaskIds(ctx: ResearchContext): string[] {
+  const root = path.join(path.resolve(ctx.jobsRoot), 'research');
+  if (!existsSync(root)) return [];
+  regularDirectory(root);
+  const entries = readdirSync(root);
+  if (entries.length > 10_000) throw new Error('Research task inventory exceeds 10000 entries.');
+  return entries.filter((entry) => TASK_ID.test(entry));
+}
+
+function researchStoreForId(ctx: ResearchContext, id: string): ResearchContext {
+  if (ctx.legacyJobsRoot === undefined) return storedResearchStore(ctx, id);
+  const current = existsSync(taskPaths(ctx, id, false).record);
+  const legacyCtx = { ...ctx, jobsRoot: ctx.legacyJobsRoot, legacyJobsRoot: undefined };
+  const legacy = existsSync(taskPaths(legacyCtx, id, false).record);
+  if (current && legacy) throw new Error('Research task exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+  return storedResearchStore(legacy ? legacyCtx : { ...ctx, legacyJobsRoot: undefined }, id);
+}
+
+function storedResearchStore(ctx: ResearchContext, id: string): ResearchContext {
+  const record = taskPaths(ctx, id, false).record;
+  if (!existsSync(record)) return ctx;
+  const value = readJson(record, MAX_JSON_BYTES);
+  const mandate = value['mandate'];
+  if (!isRecord(mandate) || typeof mandate['jobsRoot'] !== 'string' || !path.isAbsolute(mandate['jobsRoot'])) return ctx;
+  const recorded = mandate['jobsRoot'];
+  if (recorded === path.resolve(ctx.jobsRoot)) return ctx;
+  try {
+    if (realpathSync(recorded) === realpathSync(ctx.jobsRoot)) return { ...ctx, jobsRoot: recorded };
+  } catch { /* Normal validation reports a missing or altered store. */ }
+  return ctx;
 }
 
 function taskPaths(ctx: ResearchContext, id: string, create: boolean): TaskPaths {

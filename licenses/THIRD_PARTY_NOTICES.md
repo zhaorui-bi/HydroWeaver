@@ -106,7 +106,7 @@ font assets. An entry in this inventory does not imply endorsement by its author
 | @fontsource-variable/inter | 5.2.8 | OFL-1.1 | Google Inc. | https://fontsource.org/fonts/inter |
 | @fontsource-variable/noto-serif-sc | 5.3.1 | OFL-1.1 | Google Inc. | https://fontsource.org/fonts/noto-serif-sc |
 | @google/genai | 1.52.0 | Apache-2.0 |  | https://github.com/googleapis/js-genai#readme |
-| @hono/node-server | 2.1.3 | MIT | Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe) | https://github.com/honojs/node-server |
+| @hono/node-server | 2.1.8 | MIT | Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe) | https://github.com/honojs/node-server |
 | @iconify-json/simple-icons | 1.2.84 | CC0-1.0 |  | https://icon-sets.iconify.design/simple-icons/ |
 | @iconify/types | 2.0.0 | MIT | Vjacheslav Trushkin | https://github.com/iconify/iconify |
 | @iconify/utils | 3.1.3 | MIT | Vjacheslav Trushkin | https://iconify.design/docs/libraries/utils/ |
@@ -596,7 +596,7 @@ font assets. An entry in this inventory does not imply endorsement by its author
 | heic-to | 1.5.2 | LGPL-3.0 | Hopper Gee | https://github.com/hoppergee/heic-to |
 | highlight.js | 10.7.3 | BSD-3-Clause | Ivan Sagalaev | https://highlightjs.org/ |
 | highlightjs-vue | 1.0.0 | CC0-1.0 | Sara Lissette <lissette.ibnz@gmail.com> (https://github.com/LissetteIbnz) | https://github.com/highlightjs/highlightjs-vue#readme |
-| hono | 4.13.13 | MIT | Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe) | https://hono.dev |
+| hono | 4.13.18 | MIT | Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe) | https://hono.dev |
 | hookable | 5.5.3 | MIT |  | unjs/hookable |
 | html-escaper | 3.0.3 | MIT | Andrea Giammarchi | https://github.com/WebReflection/html-escaper |
 | html-url-attributes | 3.0.1 | MIT | Titus Wormer <tituswormer@gmail.com> (https://wooorm.com) | https://github.com/rehypejs/rehype-minify/tree/main/packages/html-url-attributes |
@@ -2392,7 +2392,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 </details>
 
-<details><summary>@hono/node-server@2.1.3 — 35d16fc259cf</summary>
+<details><summary>@hono/node-server@2.1.8 — 35d16fc259cf</summary>
 
 <pre>
 MIT License
@@ -9461,7 +9461,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 </details>
 
-<details><summary>hono@4.13.13 — 2e0a854a1106</summary>
+<details><summary>hono@4.13.18 — 2e0a854a1106</summary>
 
 <pre>
 MIT License

@@ -28,6 +28,26 @@ afterEach(async () => {
 });
 
 describe('persistent research mandates', () => {
+  it('recovers legacy tasks in place alongside new workspace tasks and rejects duplicate identities', async () => {
+    const fixture = setup();
+    const legacy = fixture.ctx;
+    const current = { ...legacy, jobsRoot: path.join(fixture.root, 'workspace-jobs'), legacyJobsRoot: legacy.jobsRoot };
+    const oldInput = { requestId: 'old-case', objective: 'Recover an old case', queryFile: fixture.queryFile };
+    const oldTask = createResearchTask(legacy, oldInput);
+    const newTask = createResearchTask(current, { ...oldInput, requestId: 'new-case' });
+    expect(createResearchTask(current, oldInput).id).toBe(oldTask.id);
+    expect(listResearchTasks(current).map((task) => task.id).toSorted()).toEqual([oldTask.id, newTask.id].toSorted());
+    expect(getResearchTask(current, oldTask.id)?.mandate.jobsRoot).toBe(legacy.jobsRoot);
+    const cancelled = await cancelResearchTask(current, { taskId: oldTask.id, reason: 'No longer needed' });
+    expect(cancelled.status).toBe('cancelled');
+    expect(getResearchTask(legacy, oldTask.id)?.status).toBe('cancelled');
+    createResearchTask({ ...current, legacyJobsRoot: undefined }, oldInput);
+    expect(() => getResearchTask(current, oldTask.id)).toThrow(/both job stores/);
+    expect(() => listResearchTasks(current)).toThrow(/both job stores/);
+    expect(() => listResearchTasks(current, { status: 'open', limit: 1 })).toThrow(/both job stores/);
+    expect(getResearchTask(legacy, oldTask.id)?.status).toBe('cancelled');
+  });
+
   it('registers without a backend, freezes unknown query context, and rejects conflicting request identities', () => {
     const fixture = setup();
     const ctx = { ...fixture.ctx, env: { OPENAQUA_WORKDIR: fixture.root, PATH: '' } };
@@ -45,6 +65,20 @@ describe('persistent research mandates', () => {
     expect(getResearchTask(ctx, task.id)?.queryRevisions[0]?.sha256).toBe(snapshot.sha256);
     expect(listResearchTasks(ctx, { status: 'open' }).map((item) => item.id)).toEqual([task.id]);
     expect(() => getResearchTask(ctx, '../task.json')).toThrow(/Invalid research task id/);
+  });
+
+  it('reopens tasks through a workspace symlink without changing frozen paths', () => {
+    if (process.platform === 'win32') return;
+    const fixture = setup();
+    const link = path.join(fixture.root, 'workspace-link');
+    symlinkSync(fixture.root, link, 'dir');
+    const throughLink = { ...fixture.ctx, jobsRoot: path.join(link, 'jobs') };
+    const input = { requestId: 'alias-case', objective: 'Preserve stored paths', queryFile: fixture.queryFile };
+    const original = createResearchTask(fixture.ctx, input);
+    expect(getResearchTask(throughLink, original.id)?.mandate.jobsRoot).toBe(fixture.ctx.jobsRoot);
+    expect(listResearchTasks(throughLink).map((task) => task.id)).toContain(original.id);
+    const aliasTask = createResearchTask(throughLink, { ...input, requestId: 'created-through-alias' });
+    expect(getResearchTask(fixture.ctx, aliasTask.id)?.mandate.jobsRoot).toBe(throughLink.jobsRoot);
   });
 
   it('requires valid bounded JSON, regular input files, and an unchanged mandate budget', () => {

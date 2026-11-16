@@ -168,7 +168,7 @@ async function setupModel(homeDir: string, options: OnboardOptions, rl: Interfac
       await applyAndReport(homeDir, { presetId: preset.id, apiKey, apiKeyEnv });
     } else if (idx === PROVIDER_PRESETS.length + 1) {
       const baseUrl = await ask(rl, 'base URL (e.g. https://host/v1)', '');
-      const providerType = (await ask(rl, 'provider type (openai|anthropic|kimi)', 'openai')) as OnboardOptions['providerType'];
+      const providerType = (await ask(rl, 'provider protocol (openai|openai_responses|anthropic|google-genai|vertexai|kimi)', 'openai')) as OnboardOptions['providerType'];
       const model = await ask(rl, 'model name (required — the default model follows the provider)', '');
       if (baseUrl === '' || model === '') {
         process.stdout.write('base URL and model name are required for a custom provider — skipped.\n');
@@ -197,8 +197,6 @@ async function setupModel(homeDir: string, options: OnboardOptions, rl: Interfac
       'no default model configured. Set one without login; environment-variable keys are recommended:',
       '  export DEEPSEEK_API_KEY="..."',
       '  openaqua onboard --provider deepseek --api-key-env DEEPSEEK_API_KEY',
-      '  export KIMI_CODING_API_KEY="..."',
-      '  openaqua onboard --provider kimi-coding --api-key-env KIMI_CODING_API_KEY',
       '  openaqua onboard --provider custom --base-url https://host/v1 --model my-model --api-key-env LAB_API_KEY',
       '',
     ].join('\n'),

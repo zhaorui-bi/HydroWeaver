@@ -32,6 +32,7 @@ import { RESEARCH_TOOLS } from './research-tools';
 export interface ToolContext {
   readonly homeDir?: string;
   readonly jobsRoot: string;
+  readonly legacyJobsRoot?: string;
   readonly env: NodeJS.ProcessEnv;
 }
 
@@ -733,9 +734,15 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
     async run(args, ctx) {
       const status = args['status'] as JobStatus | undefined;
       const limit = typeof args['limit'] === 'number' ? args['limit'] : 20;
-      const matching = listJobs(ctx.jobsRoot).filter(
-        (job) => status === undefined || job.status === status,
-      );
+      const jobs = listJobs(ctx.jobsRoot);
+      const legacy = ctx.legacyJobsRoot === undefined ? [] : listJobs(ctx.legacyJobsRoot);
+      const ids = new Set(jobs.map((job) => job.id));
+      if (legacy.some((job) => ids.has(job.id))) {
+        return fail('A job exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      }
+      const matching = [...jobs, ...legacy]
+        .filter((job) => status === undefined || job.status === status)
+        .toSorted((a, b) => b.startedAt.localeCompare(a.startedAt));
       return ok({
         jobsRoot: ctx.jobsRoot,
         total: matching.length,
@@ -750,6 +757,9 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
     description: 'Read lifecycle state, timestamps, duration, exit state, and output location for a job.',
     inputSchema: { jobId: jobIdSchema },
     async run(args, ctx) {
+      const store = jobStoreForId(ctx, String(args['jobId']));
+      if (store === undefined) return fail('Job exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      ctx = { ...ctx, jobsRoot: store };
       const job = getJob(ctx.jobsRoot, String(args['jobId']));
       return job === undefined ? fail(`unknown job id: ${String(args['jobId'])}`) : ok(publicJob(job));
     },
@@ -765,6 +775,9 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
       maxDepth: z.number().int().min(0).max(8).optional(),
     },
     async run(args, ctx) {
+      const store = jobStoreForId(ctx, String(args['jobId']));
+      if (store === undefined) return fail('Job exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      ctx = { ...ctx, jobsRoot: store };
       const jobId = String(args['jobId']);
       const job = getJob(ctx.jobsRoot, jobId);
       if (job === undefined) return fail(`unknown job id: ${jobId}`);
@@ -804,6 +817,9 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
       tailBytes: z.number().int().min(1).max(1_000_000).optional(),
     },
     async run(args, ctx) {
+      const store = jobStoreForId(ctx, String(args['jobId']));
+      if (store === undefined) return fail('Job exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      ctx = { ...ctx, jobsRoot: store };
       const job = getJob(ctx.jobsRoot, String(args['jobId']));
       if (job === undefined) return fail(`unknown job id: ${String(args['jobId'])}`);
       if (args['maxBytes'] !== undefined && args['tailBytes'] !== undefined) {
@@ -844,6 +860,9 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
       maxDepth: z.number().int().min(0).max(8).optional(),
     },
     async run(args, ctx) {
+      const store = jobStoreForId(ctx, String(args['jobId']));
+      if (store === undefined) return fail('Job exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      ctx = { ...ctx, jobsRoot: store };
       const listing = listJobArtifacts(ctx.jobsRoot, String(args['jobId']), {
         maxEntries: typeof args['maxEntries'] === 'number' ? args['maxEntries'] : undefined,
         maxDepth: typeof args['maxDepth'] === 'number' ? args['maxDepth'] : undefined,
@@ -865,6 +884,9 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
       'Cancel a running job gracefully, then terminate its process tree forcefully after a bounded grace period if needed.',
     inputSchema: { jobId: jobIdSchema },
     async run(args, ctx) {
+      const store = jobStoreForId(ctx, String(args['jobId']));
+      if (store === undefined) return fail('Job exists in both job stores; set OPENAQUA_JOBS_DIR to select one.');
+      ctx = { ...ctx, jobsRoot: store };
       try {
         const job = await cancelJob(ctx.jobsRoot, String(args['jobId']));
         return job === undefined ? fail(`unknown job id: ${String(args['jobId'])}`) : ok(publicJob(job));
@@ -878,6 +900,14 @@ export const OPENAQUA_TOOLS: readonly OpenAquaTool[] = [
   },
   ...RESEARCH_TOOLS,
 ];
+
+function jobStoreForId(ctx: ToolContext, id: string): string | undefined {
+  if (ctx.legacyJobsRoot === undefined) return ctx.jobsRoot;
+  const current = getJob(ctx.jobsRoot, id);
+  const legacy = getJob(ctx.legacyJobsRoot, id);
+  if (current !== undefined && legacy !== undefined) return undefined;
+  return legacy === undefined ? ctx.jobsRoot : ctx.legacyJobsRoot;
+}
 
 const SCIENTIFIC_ENVIRONMENT_KEYS = [
   'OPENAQUA_OPENROUTER_MODEL',

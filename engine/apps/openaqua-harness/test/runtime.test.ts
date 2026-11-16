@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdtempSync,
@@ -22,7 +23,7 @@ import { atomicWriteText } from '../src/fs-utils';
 import { createDefaultSession, promptTurnToEnd } from '../src/harness';
 import { ensureOpenAquaMcpJson, mcpEnvironment } from '../src/mcp/register';
 import { runOnboard } from '../src/onboard';
-import { resolveOpenAquaHome, resolveUserPath } from '../src/paths';
+import { resolveJobStores, resolveOpenAquaHome, resolveUserPath } from '../src/paths';
 import { validateProviderBaseUrl } from '../src/providers';
 import { openAquaTuiEnvironment } from '../src/tui';
 import {
@@ -60,6 +61,28 @@ afterEach(() => {
 });
 
 describe('CLI arguments', () => {
+  it('shares the workdir store and preserves the current-directory legacy store', () => {
+    const cwd = path.resolve('/tmp/launch');
+    const workdir = path.resolve('/tmp/workspace');
+    expect(resolveJobStores({ OPENAQUA_WORKDIR: workdir }, cwd)).toEqual({
+      jobsRoot: path.join(workdir, 'openaqua-jobs'),
+      legacyJobsRoot: path.join(cwd, 'openaqua-jobs'),
+    });
+    expect(resolveJobStores({}, cwd)).toEqual({ jobsRoot: path.join(cwd, 'openaqua-jobs'), legacyJobsRoot: undefined });
+    expect(resolveJobStores({ OPENAQUA_WORKDIR: workdir, OPENAQUA_JOBS_DIR: '/tmp/explicit' }, cwd)).toEqual({ jobsRoot: path.resolve('/tmp/explicit') });
+    if (process.platform !== 'win32') {
+      const actual = makeTempDir();
+      const alias = `${actual}-link`;
+      symlinkSync(actual, alias, 'dir');
+      tempDirs.push(alias);
+      expect(resolveJobStores({ OPENAQUA_WORKDIR: alias }, actual).legacyJobsRoot).toBeUndefined();
+      const separate = makeTempDir();
+      mkdirSync(path.join(actual, 'openaqua-jobs'));
+      symlinkSync(path.join(actual, 'openaqua-jobs'), path.join(separate, 'openaqua-jobs'), 'dir');
+      expect(() => resolveJobStores({ OPENAQUA_WORKDIR: separate }, actual)).toThrow(/symbolic link/);
+    }
+  });
+
   it('parses command-specific flags without consuming positionals as boolean values', () => {
     expect(parseCliInvocation(['web', '--port', '0', '--host=127.0.0.1', '--no-open'])).toEqual({
       kind: 'web',
@@ -851,6 +874,31 @@ describe('background jobs', () => {
     const secondBenchmark = second?.inputs.find((input) => input.role === 'benchmark');
     expect(secondBenchmark?.sha256).not.toBe(firstBenchmark?.sha256);
     expect(second?.requestSha256).not.toBe(first?.requestSha256);
+  }, 15_000);
+
+  it('lists and accesses older jobs beside the workspace job store', async () => {
+    const root = makeTempDir();
+    const jobsRoot = path.join(root, 'current-jobs');
+    const legacyJobsRoot = path.join(root, 'legacy-jobs');
+    const oldJob = startJob(legacyJobsRoot, [process.execPath, '-e', "console.log('legacy output')"], { workDir: root });
+    const newJob = startJob(jobsRoot, [process.execPath, '-e', "console.log('current output')"], { workDir: root });
+    await Promise.all([waitForJob(legacyJobsRoot, oldJob.id, 10_000, 20), waitForJob(jobsRoot, newJob.id, 10_000, 20)]);
+    const ctx = { jobsRoot, legacyJobsRoot, env: {} };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const tool = OPENAQUA_TOOLS.find((entry) => entry.name === `openaqua_job_${name}`)!;
+      return tool.run(args, ctx);
+    };
+    const listed = await call('list', {});
+    expect(JSON.parse(listed.content[0].text).jobs.map((job: { jobId: string }) => job.jobId).toSorted()).toEqual([oldJob.id, newJob.id].toSorted());
+    for (const name of ['status', 'manifest', 'log', 'artifacts', 'cancel']) {
+      const result = await call(name, { jobId: oldJob.id });
+      expect(result.isError, name).not.toBe(true);
+    }
+    const log = await call('log', { jobId: oldJob.id });
+    expect(log.content[0].text).toContain('legacy output');
+    cpSync(path.join(legacyJobsRoot, oldJob.id), path.join(jobsRoot, oldJob.id), { recursive: true });
+    expect((await call('list', {})).isError).toBe(true);
+    expect((await call('status', { jobId: oldJob.id })).isError).toBe(true);
   }, 15_000);
 
   it('runs through the detached runner and exposes bounded, cursor-based log views', async () => {

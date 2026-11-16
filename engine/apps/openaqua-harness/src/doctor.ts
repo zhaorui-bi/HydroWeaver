@@ -176,7 +176,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   checks.push({
     name: 'web_ui_assets',
     ok: webOk,
-    detail: webOk ? webAssetsDir : `${webAssetsDir} (missing — build/sync apps/kimi-code/dist-web)`,
+    detail: webOk ? webAssetsDir : `${webAssetsDir} (missing — run npm run setup from the project directory)`,
     required: false,
   });
 

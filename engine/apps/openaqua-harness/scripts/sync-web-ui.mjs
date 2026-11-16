@@ -55,6 +55,13 @@ const TEXT_REPLACEMENTS = [
   ],
   ['Kimi Code Web', 'OpenAqua Harness'],
   ['Kimi Code', 'OpenAqua Harness'],
+  ['kimi-web-log-${', 'openaqua-web-log-${'],
+  ['Please upgrade kimi-code and try again', 'Please update OpenAqua Harness and try again'],
+  ['请升级 kimi-code 后重试', '请更新 OpenAqua Harness 后重试'],
+  ['Sign-in polling failed repeatedly. Check the kimi-code process and try again.', 'Sign-in polling failed repeatedly. Check the application and try again.'],
+  ['登录轮询连续失败，请检查 kimi-code 进程后重试', '登录状态检查连续失败，请检查应用后重试'],
+  ['Session data exceeds the export size limit. Export it from a terminal instead: kimi export {sessionId} -o session.zip', 'Session data exceeds the browser export size limit.'],
+  ['会话数据超过导出大小限制,可在终端用 CLI 导出:kimi export {sessionId} -o session.zip', '会话数据超过浏览器导出大小限制。'],
   // Research-flavored composer placeholders replace the upstream neutral ones.
   [
     'Type a message to start a new conversation…',
@@ -485,11 +492,16 @@ console.log(`web-ui: bundled ${FONT_PACKAGES.length} self-hosted theme font fami
 // Cache-bust: the server sends /assets with `immutable, max-age=1y` while our
 // patches keep the original hash filenames, so stamp a content-version query
 // onto every asset URL in index.html to force revalidation after each sync.
+// Include the separately served scripts as well as the main bundle: either can
+// change without a change to the upstream JS or CSS.
 {
   const indexPath = path.join(DST, 'index.html');
   let html = readFileSync(indexPath, 'utf8');
   const hash = createHash('sha1');
-  for (const entry of readdirSync(path.join(DST, 'assets'))) {
+  for (const script of ['boot.js', 'openaqua-welcome.js']) {
+    hash.update(readFileSync(path.join(DST, script)));
+  }
+  for (const entry of readdirSync(path.join(DST, 'assets')).sort()) {
     if (/^index-.*\.(js|css)$/.test(entry)) {
       hash.update(readFileSync(path.join(DST, 'assets', entry)));
     }
@@ -596,6 +608,21 @@ function assertBrandContract() {
   }
   if (javascript.includes('Kimi For Coding') || javascript.includes('月之暗面')) {
     throw new Error('Branding contract failed: Kimi subscription presets are still listed');
+  }
+  for (const obsoleteText of [
+    'Please upgrade kimi-code and try again',
+    '请升级 kimi-code 后重试',
+    'Check the kimi-code process',
+    '请检查 kimi-code 进程',
+    'kimi export {sessionId} -o session.zip',
+    'kimi-web-log-${',
+  ]) {
+    if (javascript.includes(obsoleteText)) {
+      throw new Error(`Branding contract failed: upstream UI text remains: ${obsoleteText}`);
+    }
+  }
+  if (!javascript.includes('openaqua-web-log-${')) {
+    throw new Error('Branding contract failed: OpenAqua diagnostic log filename is missing');
   }
   const providerSetupHandler = 'function a(){c()}function l(){Vy.value=!0}';
   if (javascript.split(providerSetupHandler).length - 1 !== 1) {

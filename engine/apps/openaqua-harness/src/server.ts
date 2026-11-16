@@ -67,7 +67,7 @@ export async function runWeb(options: WebOptions): Promise<void> {
   );
   if (!existsSync(path.join(webAssetsDir, 'index.html'))) {
     throw new Error(
-      `Web UI assets not found at ${webAssetsDir}. Build or sync apps/kimi-code/dist-web in the kimi-code monorepo, or set OPENAQUA_WEB_ASSETS_DIR.`,
+      `Web UI assets not found at ${webAssetsDir}. Run npm run setup from the OpenAqua Harness project directory, or set OPENAQUA_WEB_ASSETS_DIR to a valid asset directory.`,
     );
   }
 

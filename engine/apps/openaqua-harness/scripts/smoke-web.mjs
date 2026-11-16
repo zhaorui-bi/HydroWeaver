@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +60,21 @@ try {
   }
   if (!assetHtml.includes('<script src="/openaqua-welcome.js')) {
     throw new Error('Web UI entry point does not load the OpenAqua welcome addon');
+  }
+  const hash = createHash('sha1');
+  for (const script of ['boot.js', 'openaqua-welcome.js']) {
+    hash.update(await readFile(path.join(webAssetsDir, script)));
+  }
+  for (const entry of (await readdir(path.join(webAssetsDir, 'assets'))).sort()) {
+    if (/^index-.*\.(js|css)$/.test(entry)) {
+      hash.update(await readFile(path.join(webAssetsDir, 'assets', entry)));
+    }
+  }
+  const expectedStamp = hash.digest('hex').slice(0, 8);
+  for (const resource of ['/boot.js', '/openaqua-welcome.js']) {
+    if (!assetHtml.includes(`${resource}?v=${expectedStamp}`)) {
+      throw new Error(`Web UI ${resource} has a stale cache version`);
+    }
   }
 
   const welcomeResponse = await fetch(`${url.origin}/openaqua-welcome.js`, {

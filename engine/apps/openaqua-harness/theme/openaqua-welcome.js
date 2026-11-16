@@ -27,7 +27,8 @@
         'Ask a research question',
         'Review evidence & constraints',
       ],
-      hint: 'Click a card to load and run it — edit the prompt in the composer anytime.',
+      hint: 'Choose a scenario to add it to your draft. Review and send when you are ready.',
+      insertFailed: 'Could not add the scenario. Please enter it in the composer manually.',
       cite: {
         label: 'How to cite',
         short: 'Liu H. et al. (2027). OpenAqua. Water Research 308, 126761.',
@@ -38,6 +39,7 @@
           'https://github.com/zhaorui-bi/OpenAqua-Harness/blob/main/docs/OPENAQUA.md',
         copy: 'Copy citation',
         copied: 'Copied ✓',
+        copyFailed: 'Could not copy. Select the text below and copy it manually.',
         plain:
           'Liu H., Jiang Z., Zhong H., Li J., Pang W., Yuan Y. (2027). OpenAqua: An ' +
           'automated multi-agent framework for early-stage water treatment train design ' +
@@ -91,11 +93,12 @@
       ],
     },
     zh: {
-      ledePrefix: '面向循证的早期工艺路线设计 ——',
+      ledePrefix: '面向循证的早期工艺路线设计',
       ledeStrong: '从下面的真实场景出发',
       ledeSuffix: '，或描述你自己的课题。',
       steps: ['配置模型', '提出研究问题', '审阅证据与约束'],
-      hint: '点击卡片即载入并运行 —— 随时可在输入框中修改问题。',
+      hint: '点击场景添加到草稿，确认或修改后再发送。',
+      insertFailed: '无法添加场景，请手动输入到编辑框。',
       cite: {
         label: '如何引用',
         short: 'Liu H. 等（2027）. OpenAqua. Water Research 308, 126761.',
@@ -106,6 +109,7 @@
           'https://github.com/zhaorui-bi/OpenAqua-Harness/blob/main/docs/OPENAQUA.md',
         copy: '复制引用',
         copied: '已复制 ✓',
+        copyFailed: '复制失败，请选中下方文字手动复制。',
         plain:
           'Liu H., Jiang Z., Zhong H., Li J., Pang W., Yuan Y. (2027). OpenAqua: An ' +
           'automated multi-agent framework for early-stage water treatment train design ' +
@@ -157,7 +161,9 @@
   };
 
   function copyForDocument() {
-    var lang = document.documentElement.lang || '';
+    var lang;
+    try { lang = window.localStorage.getItem('kimi-locale'); } catch (_err) { lang = null; }
+    if (lang !== 'en' && lang !== 'zh') lang = navigator.language || document.documentElement.lang || '';
     return lang.toLowerCase().indexOf('zh') === 0 ? COPY.zh : COPY.en;
   }
 
@@ -196,6 +202,7 @@
     var panel = el('section', 'oa-welcome');
     panel.id = PANEL_ID;
     panel.setAttribute('aria-label', copy.ledePrefix);
+    panel.setAttribute('data-language', copy === COPY.zh ? 'zh' : 'en');
 
     var lede = el('p', 'oa-welcome-lede');
     lede.appendChild(document.createTextNode(copy.ledePrefix + ' — '));
@@ -212,6 +219,8 @@
     });
     panel.appendChild(steps);
 
+    var hint = el('p', 'oa-welcome-hint', copy.hint);
+    hint.setAttribute('role', 'status');
     var cards = el('div', 'oa-welcome-cards');
     copy.starters.forEach(function (starter) {
       var card = el('button', 'oa-welcome-card');
@@ -222,13 +231,13 @@
       card.appendChild(heading);
       card.appendChild(el('p', 'oa-welcome-card-prompt', starter.prompt));
       card.addEventListener('click', function () {
-        loadIntoComposer(starter.prompt, true);
+        hint.textContent = loadIntoComposer(starter.prompt) ? copy.hint : copy.insertFailed;
       });
       cards.appendChild(card);
     });
     panel.appendChild(cards);
 
-    panel.appendChild(el('p', 'oa-welcome-hint', copy.hint));
+    panel.appendChild(hint);
 
     var cite = el('div', 'oa-welcome-cite');
     var citeHead = el('div', 'oa-welcome-cite-head');
@@ -246,41 +255,53 @@
     cite.appendChild(citeHead);
     cite.appendChild(el('p', 'oa-welcome-cite-text', copy.cite.short));
     var copyRow = el('div', 'oa-welcome-cite-actions');
+    var copyStatus = el('p', 'oa-welcome-cite-text');
+    copyStatus.setAttribute('role', 'status');
+    var manualCopy = el('textarea', 'oa-welcome-cite-manual');
+    manualCopy.setAttribute('readonly', '');
+    manualCopy.rows = 5;
+    manualCopy.setAttribute('aria-label', copy.cite.copy);
+    manualCopy.hidden = true;
     var plainButton = el('button', 'oa-welcome-cite-btn', copy.cite.copy);
     plainButton.type = 'button';
     plainButton.addEventListener('click', function () {
-      copyCitation(plainButton, copy.cite.plain, copy.cite.copied);
+      copyCitation(plainButton, copy.cite.plain, copy.cite, copyStatus, manualCopy);
     });
     var bibtexButton = el('button', 'oa-welcome-cite-btn', 'BibTeX');
     bibtexButton.type = 'button';
     bibtexButton.addEventListener('click', function () {
-      copyCitation(bibtexButton, copy.cite.bibtex, copy.cite.copied);
+      copyCitation(bibtexButton, copy.cite.bibtex, copy.cite, copyStatus, manualCopy);
     });
     copyRow.appendChild(plainButton);
     copyRow.appendChild(bibtexButton);
     cite.appendChild(copyRow);
+    cite.appendChild(copyStatus);
+    cite.appendChild(manualCopy);
     panel.appendChild(cite);
     return panel;
   }
 
-  function copyCitation(button, text, copiedLabel) {
-    var done = function () {
-      var original = button.textContent;
-      button.textContent = copiedLabel;
+  function copyCitation(button, text, copy, status, manualCopy) {
+    var finish = function (success) {
+      if (!success) {
+        status.textContent = copy.copyFailed;
+        manualCopy.value = text;
+        manualCopy.hidden = false;
+        manualCopy.focus();
+        manualCopy.select();
+        return;
+      }
+      status.textContent = copy.copied;
+      manualCopy.hidden = true;
       button.classList.add('is-copied');
-      setTimeout(function () {
-        button.textContent = original;
-        button.classList.remove('is-copied');
-      }, 1600);
+      setTimeout(function () { button.classList.remove('is-copied'); }, 1600);
     };
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      navigator.clipboard.writeText(text).then(done, function () {
-        fallbackCopy(text);
-        done();
+      navigator.clipboard.writeText(text).then(function () { finish(true); }, function () {
+        finish(fallbackCopy(text));
       });
     } else {
-      fallbackCopy(text);
-      done();
+      finish(fallbackCopy(text));
     }
   }
 
@@ -292,43 +313,47 @@
     area.style.top = '-9999px';
     document.body.appendChild(area);
     area.select();
+    var copied = false;
     try {
-      document.execCommand('copy');
+      copied = document.execCommand('copy');
     } catch (_err) {
-      // Best effort: clipboard access can be denied; the citation text stays
-      // visible for manual selection.
+      copied = false;
     }
     document.body.removeChild(area);
+    return copied;
   }
 
-  function loadIntoComposer(prompt, submit) {
+  function loadIntoComposer(prompt) {
     var editor = findComposerEditor();
-    if (!editor) return;
+    if (!editor) return false;
+    var existing = typeof editor.value === 'string' ? editor.value : editor.textContent;
+    var insertion = existing && existing.trim() ? '\n\n' + prompt : prompt;
     editor.focus();
-    var inserted = false;
+    if (typeof editor.value === 'string') {
+      var end = editor.value.length;
+      if (typeof editor.setSelectionRange === 'function') editor.setSelectionRange(end, end);
+    } else {
+      var selection = window.getSelection();
+      if (!selection) return false;
+      var range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
     try {
-      inserted = document.execCommand('insertText', false, prompt);
+      if (document.execCommand('insertText', false, insertion)) return true;
     } catch (_err) {
-      inserted = false;
+      // Fall back for plain text inputs; rich editors must handle their own state.
     }
-    if (!inserted && typeof editor.value === 'string') {
-      editor.value = prompt;
+    if (typeof editor.value === 'string') {
+      var setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(editor), 'value');
+      if (setter && setter.set) setter.set.call(editor, editor.value + insertion);
+      else editor.value += insertion;
       editor.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
     }
-    if (!submit) return;
-    // Let the editor state settle, then send with the same Enter binding the
-    // composer itself uses (plain Enter unless the composer is expanded).
-    setTimeout(function () {
-      var event = new KeyboardEvent('keydown', {
-        key: 'Enter',
-        code: 'Enter',
-        keyCode: 13,
-        which: 13,
-        bubbles: true,
-        cancelable: true,
-      });
-      editor.dispatchEvent(event);
-    }, 0);
+    return false;
   }
 
   function removePanel() {
@@ -343,7 +368,10 @@
       removePanel();
       return;
     }
-    if (document.getElementById(PANEL_ID)) return;
+    var existingPanel = document.getElementById(PANEL_ID);
+    var language = copyForDocument() === COPY.zh ? 'zh' : 'en';
+    if (existingPanel && existingPanel.getAttribute('data-language') === language) return;
+    if (existingPanel) removePanel();
     if (composer && composer.parentNode) {
       // Insert as the container's first child so the order reads
       // logo → examples → workspace selector → composer. Anchoring right
@@ -377,10 +405,12 @@
     });
   });
   if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
   } else {
     document.addEventListener('DOMContentLoaded', function () {
-      observer.observe(document.body, { childList: true, subtree: true });
+      observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
     });
   }
 })();
