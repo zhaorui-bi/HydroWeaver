@@ -72,7 +72,7 @@ knowledge data.
 | **Closed-loop optimization** | `hydroweaver_optimize_trains` runs the critique → revision → regeneration loop with a bounded round budget, per-round constraint reports, a structured planner revision directive, and an explicit convergence status (`feasible`, `stalled`, `budget_exhausted`). |
 | **Five-agent scientific pipeline** | Query normalization, hybrid evidence retrieval, taxonomy-constrained planning, rule-based critique, and evidence-bound explanations through the OpenAqua backend. |
 | **Focused MCP surface** | 26 tools for gated research tasks, runtime readiness, scientific case assessment, closed-loop optimization, mechanistic train simulation, recommendation auditing, taxonomy, recommendation, retrieval, constraint checking, indexing, knowledge staging, WContBench evaluation, and durable job control. |
-| **Persistent research tasks** | Frozen case revisions, declared scope, structured information needs, bounded job and round budgets, and recoverable readiness → assessment → retrieval → recommendation → optimization → audit → handoff stages. |
+| **Persistent research tasks** | Frozen case revisions, declared scope, structured information needs, bounded job and round budgets, and recoverable readiness → assessment → retrieval → recommendation → optimization → simulation → audit → handoff stages. |
 | **Three user interfaces** | Full terminal UI, lightweight CLI/REPL, local browser UI, and an Electron desktop shell backed by the same harness. |
 | **Durable engineering jobs** | Long operations survive session closure and expose lifecycle state, bounded logs, output metadata, input hashes, payload hashes, and request fingerprints. |
 | **Two model layers** | API-provider setup for the conversational agent, plus optional `OPENROUTER_API_KEY` support for OpenAqua's parser/planner/explainer agents. |
@@ -327,7 +327,8 @@ identifiers rather than inventing performance values.
 
 Follow the case-to-report workflow: **assess and clarify the case → review
 evidence applicability → compare treatment trains → close the optimization loop →
-audit and hand off**.
+simulate the feasible train with WaterTAP (when configured) → audit and hand
+off**.
 Call `hydroweaver_assess_case` before recommendation,
 `hydroweaver_optimize_trains` to refine the recommended trains, and
 `hydroweaver_audit_report` on the saved result; job success and scientific audit

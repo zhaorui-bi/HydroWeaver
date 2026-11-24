@@ -69,6 +69,15 @@ versioning.
   salinity-driven hydraulics and energy only; units without a mechanistic model
   are reported as unsupported rather than simulated.
 
+### Added
+
+- An optional simulation stage in the research flow. Between optimization and
+  audit, the top feasible train is built as a WaterTAP/IDAES flowsheet and
+  solved with IPOPT; the outcome (optimal, unsupported, unconverged, error, or
+  skipped because no backend is configured) is recorded with its limitations,
+  the manifest carries the package versions and solver settings, and handoff
+  requires a recorded simulation outcome. The default job budget is eight.
+
 ### Repository maintenance
 
 - Replaced the legacy droplet mark with new HydroWeaver brand artwork (woven

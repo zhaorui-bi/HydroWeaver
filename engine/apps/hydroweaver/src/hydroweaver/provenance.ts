@@ -306,6 +306,11 @@ function collectInputReferences(
       add('query', 'queryFile');
       add('candidate-chains', 'candidatesFile');
       break;
+    case 'hydroweaver_simulate_train':
+      add('query', 'queryFile');
+      add('candidate-chains', 'candidatesFile');
+      add('simulation-input', 'simulationInput');
+      break;
   }
   return references;
 }

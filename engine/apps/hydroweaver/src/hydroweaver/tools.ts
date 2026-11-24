@@ -726,13 +726,13 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
           how_to_fix: simulationSetupGuidance(),
         });
       }
-      const command = [backend.python, simulationRunnerPath(), 'simulate', '--input', inputPath, '--output', output];
+      const command = [backend.python, simulationRunnerPath(ctx.env), 'simulate', '--input', inputPath, '--output', output];
       let provenance: ReturnType<typeof createEngineeringJobRequest>;
       try {
         provenance = createEngineeringJobRequest({
           toolName: 'hydroweaver_simulate_train',
           operation: 'simulate',
-          backend: { command: [backend.python, simulationRunnerPath()], source: backend.source },
+          backend: { command: [backend.python, simulationRunnerPath(ctx.env)], source: backend.source },
           backendVersion: selfCheck.versions['watertap'] ?? undefined,
           args: { queryFile: casePath, chain, chainId: payload.train.chain_id, output, options: payload.options },
           workDir,

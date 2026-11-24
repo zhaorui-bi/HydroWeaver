@@ -232,6 +232,57 @@ describe('research execution and recovery', () => {
   }, 20_000);
 });
 
+describe('simulation stage', () => {
+  it('records an optimal mechanistic result and keeps the handoff lineage', async () => {
+    const fixture = setup();
+    const ctx = fixture.withSimulation();
+    const ready = await complete(ctx, await advanceResearchTask(ctx, { taskId: create(fixture, { maxJobs: 8 }).id }));
+    expect(ready.status).toBe('ready');
+    expect(ready.stage).toBe('handoff');
+    expect(ready.scientificOutcome.simulation?.status).toBe('optimal');
+    expect(ready.scientificOutcome.simulation?.coverage?.modeled).toEqual(['Pumping', 'Reverse Osmosis']);
+    expect(ready.assignments.map((entry) => entry.stage)).toEqual([
+      'assessment', 'retrieval', 'recommendation', 'optimization', 'simulation', 'audit',
+    ]);
+    expect(operations(fixture)).toEqual(['assess-case', 'retrieve', 'recommend', 'optimize', 'audit-report']);
+    const simulationAssignment = ready.assignments.find((entry) => entry.stage === 'simulation')!;
+    const record = JSON.parse(readFileSync(simulationAssignment.output, 'utf8')) as Record<string, unknown>;
+    expect(record['kind']).toBe('hydroweaver.simulation-result');
+    expect(record['status']).toBe('optimal');
+    const manifest = readJobRunManifest(fixture.ctx.jobsRoot, simulationAssignment.jobId)!.manifest!;
+    expect(manifest.backend.version).toBe('1.8.0');
+    expect(manifest.inputs.map((input) => input.role)).toEqual(['query', 'simulation-input']);
+    expect(manifest.scientificConfiguration?.values?.['watertap']).toBe('1.8.0');
+    expect(ready.events.map((entry) => entry.type)).toContain('stage_completed');
+  }, 60_000);
+
+  it('skips the stage with a recorded limitation when no backend is configured', async () => {
+    const fixture = setup();
+    const ready = await complete(fixture.ctx, await advanceResearchTask(fixture.ctx, { taskId: create(fixture, { maxJobs: 8 }).id }));
+    expect(ready.status).toBe('ready');
+    expect(ready.scientificOutcome.simulation?.status).toBe('skipped_unconfigured');
+    expect(ready.scientificOutcome.simulation?.file).toBeUndefined();
+    expect(ready.assignments.map((entry) => entry.stage)).not.toContain('simulation');
+    expect(ready.scientificOutcome.limitations.join(' ')).toContain('skipped because no simulation backend');
+    expect(ready.events.map((entry) => entry.type)).toContain('simulation_skipped');
+  }, 60_000);
+
+  it.each([
+    ['unsupported', 'unsupported', 'no unit with a mechanistic model'],
+    ['unconverged', 'unconverged', 'did not reach an optimal termination'],
+    ['error', 'error', 'failed to build or solve'],
+  ])('records a %s simulation outcome without claiming feasibility', async (mode, expected, phrase) => {
+    const fixture = setup();
+    const ctx = fixture.withSimulation({ status: mode, unsupported: mode === 'unsupported' ? ['Adsorption'] : [] });
+    const ready = await complete(ctx, await advanceResearchTask(ctx, { taskId: create(fixture, { maxJobs: 8 }).id }));
+    expect(ready.status).toBe('ready');
+    expect(ready.scientificOutcome.simulation?.status).toBe(expected);
+    expect(ready.scientificOutcome.simulation?.coverage?.unsupported).toEqual(mode === 'unsupported' ? ['Adsorption'] : []);
+    expect(ready.scientificOutcome.limitations.join(' ')).toContain(phrase);
+    expect(ready.assignments.map((entry) => entry.stage)).toContain('simulation');
+  }, 60_000);
+});
+
 describe('scientific workflow gates', () => {
   it('blocks critical gaps, preserves old revisions, and reassesses an amended case', async () => {
     const fixture = setup({ readiness: 'blocked' });
@@ -438,6 +489,7 @@ function setup(initialMode: Record<string, unknown> = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'hydroweaver-research-test-'));
   roots.push(root);
   const backend = path.join(root, 'adapter-fixture.mjs');
+  const simRunner = path.join(root, 'sim-fixture.mjs');
   const queryFile = path.join(root, 'query.json');
   const control = path.join(root, 'control.json');
   const calls = path.join(root, 'calls.jsonl');
@@ -445,10 +497,73 @@ function setup(initialMode: Record<string, unknown> = {}) {
   writeFileSync(queryFile, JSON.stringify(query));
   writeFileSync(control, JSON.stringify(initialMode));
   writeFileSync(backend, fixtureScript);
+  writeFileSync(simRunner, simRunnerScript);
   const ctx: ResearchContext = { jobsRoot: path.join(root, 'jobs'), env: { ...process.env, HYDROWEAVER_WORKDIR: root, HYDROWEAVER_COMMAND: JSON.stringify([process.execPath, backend]) } };
   contexts.push(ctx);
-  return { root, queryFile, query, ctx, calls, mode: (settings: Record<string, unknown>) => { writeFileSync(control, JSON.stringify(settings)); } };
+  return {
+    root,
+    queryFile,
+    query,
+    ctx,
+    calls,
+    mode: (settings: Record<string, unknown>) => { writeFileSync(control, JSON.stringify(settings)); },
+    withSimulation: (simMode: Record<string, unknown> = {}) => ({
+      ...ctx,
+      env: {
+        ...ctx.env,
+        HYDROWEAVER_SIM_PYTHON: process.execPath,
+        HYDROWEAVER_SIM_RUNNER: simRunner,
+        HYDROWEAVER_SIM_MODE: JSON.stringify(simMode),
+      },
+    }),
+    simRunner,
+  };
 }
+
+const simRunnerScript = String.raw`
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === 'self-check') {
+  console.log(JSON.stringify({
+    kind: 'hydroweaver.simulation-selfcheck',
+    schema_version: 1,
+    available: true,
+    environment: { versions: { watertap: '1.8.0', 'idaes-pse': '2.13.0', pyomo: '6.10.1', cyipopt: '1.7.0' }, python: '3.10.22' },
+    solver: { name: 'ipopt', available: true, detail: 'fixture' },
+    supported_units: [{ unit: 'Pumping' }, { unit: 'Reverse Osmosis' }],
+  }));
+  process.exit(0);
+}
+if (args[0] === 'simulate') {
+  const value = (flag) => args[args.indexOf(flag) + 1];
+  const input = JSON.parse(readFileSync(value('--input'), 'utf8'));
+  const mode = JSON.parse(process.env.HYDROWEAVER_SIM_MODE || '{}');
+  const status = mode.status || 'optimal';
+  const payload = {
+    kind: 'hydroweaver.simulation-result',
+    schema_version: 1,
+    status,
+    coverage: { modeled: ['Pumping', 'Reverse Osmosis'], unsupported: mode.unsupported ?? [] },
+    train: input.train,
+    units: status === 'optimal' ? [
+      { unit: 'Pumping', model: 'fixture.Pump', results: { outlet_pressure_bar: 9.46, electrical_work_W: 2701.98 } },
+      { unit: 'Reverse Osmosis', model: 'fixture.ReverseOsmosis0D', results: { permeate_flow_kg_s: 1.443142, recovery_fraction: 0.5, permeate_NaCl_g_L: 0.08319, membrane_area_m2: 883.697 } },
+    ] : [],
+    flowsheet: status === 'optimal' ? { product_water_flow_kg_s: 1.443142, recovery_fraction: 0.5, specific_energy_kWh_m3: 0.52 } : {},
+    solver: { name: 'ipopt', status: status === 'optimal' ? 'ok' : 'warning', termination_condition: status === 'optimal' ? 'optimal' : 'infeasible', iterations: 12, message: 'fixture' },
+    environment: { versions: { watertap: '1.8.0', 'idaes-pse': '2.13.0', pyomo: '6.10.1' }, python: '3.10.22' },
+    limitations: ['fixture'],
+  };
+  const output = value('--output');
+  mkdirSync(path.dirname(output), { recursive: true });
+  writeFileSync(output, JSON.stringify(payload) + '\n');
+  console.log(JSON.stringify(payload));
+  process.exit(0);
+}
+process.exit(2);
+`;
+
 
 const fixtureScript = String.raw`
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

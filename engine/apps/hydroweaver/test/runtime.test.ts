@@ -220,7 +220,7 @@ describe('research CLI command boundary', () => {
     const list = await runResearchCommand('list', {}, ctx);
     expect(JSON.parse(list.content[0]?.text ?? '')).toMatchObject({ returned: 1, tasks: [{ id: created.id }] });
     const summary = (JSON.parse(list.content[0]?.text ?? '') as { tasks: Record<string, unknown>[] }).tasks[0];
-    expect(summary).toMatchObject({ jobsUsed: 0, maxJobs: 6, openAttention: [], objectiveTruncated: false });
+    expect(summary).toMatchObject({ jobsUsed: 0, maxJobs: 8, openAttention: [], objectiveTruncated: false });
     expect(summary).not.toHaveProperty('events');
     expect(summary).not.toHaveProperty('queryRevisions');
     expect(listJobs(ctx.jobsRoot)).toEqual([]);

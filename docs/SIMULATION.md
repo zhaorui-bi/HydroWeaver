@@ -185,6 +185,23 @@ The mapping is data, not code: adding a unit model means adding one entry and
 a test, and the self-check reports the supported set so agents can see
 coverage before promising a simulation.
 
+## The research-flow stage
+
+`hydroweaver research` runs the simulation as an optional stage between
+optimization and audit:
+
+- the train is the top train the closed loop certified feasible (falling back to
+  the recommendation shortlist);
+- the case is the frozen normalized query, so salinity and design flow come from
+  the declared case unless explicitly overridden;
+- with no simulation backend configured the stage is recorded as
+  `skipped_unconfigured` with a limitation and no job is launched;
+- `unsupported`, `unconverged`, and `error` outcomes are recorded with
+  limitations and never promoted to a mechanistic claim;
+- handoff requires a recorded simulation outcome for the current revision, and
+  the manifest carries the package versions, solver, property package, and
+  supported-unit list.
+
 ## Numerical recipe (verified)
 
 These choices are what makes the screening solve converge across salinities;
@@ -224,7 +241,7 @@ reproduction. This is why versions are recorded rather than assumed.
 | P1 | `hydroweaver_simulate_train` — steady-state simulation of RO/NF + pumping with coverage reporting | done |
 | P2 | WaterTAP costing — `hydroweaver_cost_train` (CAPEX/OPEX/LCOW) | planned |
 | P3 | Pyomo + IPOPT design optimization — `hydroweaver_optimize_design`, results fed back into the research optimization stage | planned |
-| P4 | Optional `simulation` research stage, `hydroweaver-simulation` skill, README/docs integration | planned |
+| P4 | Optional `simulation` research stage between optimization and audit | done |
 
 P0 and P1 are independently useful: even without costing or optimization, a
 verified hydraulic/energy result per candidate train is a large step beyond

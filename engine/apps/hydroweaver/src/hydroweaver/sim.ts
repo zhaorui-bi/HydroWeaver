@@ -2,9 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import { resolveUserPath } from '../paths';
+import { findPackageRoot, resolveUserPath } from '../paths';
 import { parseCommand, runCommand, type RunResult } from './backend';
-import { findPackageRoot } from '../paths';
 
 /**
  * Optional WaterTAP/IDAES/Pyomo/IPOPT simulation backend.
@@ -28,7 +27,9 @@ export interface SimulationSelfCheck {
   readonly error?: string;
 }
 
-export function simulationRunnerPath(): string {
+export function simulationRunnerPath(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env['HYDROWEAVER_SIM_RUNNER']?.trim();
+  if (override !== undefined && override !== '') return resolveUserPath(override);
   return path.join(findPackageRoot(), 'sim', 'runner.py');
 }
 
@@ -39,14 +40,18 @@ export function simulationSelfCheckCacheKey(backend: SimulationBackend, runnerPa
   return `${backend.python}|${backend.source}|${runnerPath}`;
 }
 
-export function probeSimulation(backend: SimulationBackend, timeoutMs = 120_000): Promise<SimulationSelfCheck | undefined> {
-  const runnerPath = simulationRunnerPath();
+export function probeSimulation(
+  backend: SimulationBackend,
+  timeoutMs = 120_000,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SimulationSelfCheck | undefined> {
+  const runnerPath = simulationRunnerPath(env);
   const key = simulationSelfCheckCacheKey(backend, runnerPath);
   const now = Date.now();
   if (selfCheckCache !== undefined && selfCheckCache.key === key && now - selfCheckCache.at < SELF_CHECK_TTL_MS) {
     return Promise.resolve(selfCheckCache.value);
   }
-  return runSimulation(backend, ['self-check'], { timeoutMs }).then((result) => {
+  return runSimulation(backend, ['self-check'], { timeoutMs, env }).then((result) => {
     if (result.code !== 0) {
       return {
         available: false,
@@ -98,7 +103,7 @@ export function runSimulation(
   args: readonly string[],
   options: { timeoutMs?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<RunResult> {
-  return runCommand(backend.python, [simulationRunnerPath(), ...args], {
+  return runCommand(backend.python, [simulationRunnerPath(options.env), ...args], {
     timeoutMs: options.timeoutMs ?? 120_000,
     cwd: options.cwd,
     env: options.env,
@@ -114,11 +119,11 @@ function simulationSelfCheckPayload(result: RunResult): SimulationSelfCheck | un
   return {
     available: payload['available'] === true,
     versions: asVersionRecord(environment?.['versions']),
-    python: typeof environment?.['python'] === 'string' ? (environment['python'] as string) : 'unknown',
+    python: typeof environment?.['python'] === 'string' ? environment['python'] : 'unknown',
     solver: {
-      name: typeof solver?.['name'] === 'string' ? (solver['name'] as string) : 'ipopt',
+      name: typeof solver?.['name'] === 'string' ? solver['name'] : 'ipopt',
       available: solver?.['available'] === true,
-      detail: typeof solver?.['detail'] === 'string' ? (solver['detail'] as string) : '',
+      detail: typeof solver?.['detail'] === 'string' ? solver['detail'] : '',
     },
     supportedUnits: units
       .map((unit) => (asRecord(unit)?.['unit'] as string | undefined) ?? '')

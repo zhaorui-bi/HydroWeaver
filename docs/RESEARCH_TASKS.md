@@ -15,7 +15,8 @@ flowchart LR
     Case --> Evidence[Evidence retrieval]
     Evidence --> Design[Treatment-train recommendation]
     Design --> Optimize[Closed-loop optimization]
-    Optimize --> Audit[Structural report audit]
+    Optimize --> Simulate[WaterTAP simulation]
+    Simulate --> Audit[Structural report audit]
     Audit --> Handoff[Ready for research handoff]
     Case --> Attention[Structured information or recovery task]
     Audit --> Attention
@@ -41,6 +42,25 @@ ready.
 `ready` is not expert approval, proof of evidence applicability, a performance
 guarantee, or regulatory compliance. The report audit checks structure and
 declared support; it does not establish semantic entailment or site suitability.
+
+## The WaterTAP simulation stage
+
+Between optimization and audit, the optional `simulation` stage builds the top
+feasible train as a WaterTAP/IDAES flowsheet and solves it with IPOPT. It needs
+the optional simulation backend (`HYDROWEAVER_SIM_PYTHON`); see
+[SIMULATION.md](./SIMULATION.md) for setup and scientific scope.
+
+| Outcome | Gate behavior |
+| --- | --- |
+| backend not configured | The stage is recorded as `skipped_unconfigured` with a limitation, no job is launched, and the workflow proceeds to the audit. It never claims a mechanistic result. |
+| `optimal` | The per-unit and flowsheet results are recorded and the workflow advances to the audit. |
+| `unsupported` | The train has no unit with a mechanistic model; the coverage decision is recorded with a limitation. |
+| `unconverged` / `error` | Recorded with a limitation; an unconverged solve is never read as infeasible or as a performance value. |
+
+The simulation input is written into the task artifacts and verified against the
+frozen normalized case before launch; the manifest records the WaterTAP, IDAES,
+and Pyomo versions, the solver, the property package, and the supported-unit
+list. Handoff requires a recorded simulation outcome for the current revision.
 
 ## The closed-loop optimization stage
 
@@ -151,9 +171,9 @@ execution evidence.
 
 Running or unknown jobs are not automatically relaunched. The controller keeps
 job and output identities and refuses to treat a missing, malformed, or changed
-result as a verified stage completion. The default budget is **six backend
-jobs** (assessment, retrieval, recommendation, optimization, audit, plus retry
-headroom), with a maximum of **16**; retries and revised-case reassessments consume
+result as a verified stage completion. The default budget is **eight backend
+jobs** (assessment, retrieval, recommendation, optimization, simulation, audit,
+plus retry headroom), with a maximum of **16**; retries and revised-case reassessments consume
 that budget too. The optimization stage additionally carries a bounded round budget
 (`maxRounds`, default 3, maximum 8) consumed inside one backend process. No automatic index rebuild, knowledge ingestion, benchmark
 campaign, or external message delivery is part of advancing a task.

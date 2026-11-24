@@ -58,7 +58,7 @@ export const RESEARCH_TOOLS: readonly OpenAquaTool[] = [
       objective: z.string().trim().min(1).max(8_000),
       queryFile: inputPath.describe('Upstream snake_case UserQuery JSON; relative paths resolve from HYDROWEAVER_WORKDIR.'),
       topK: z.number().int().min(1).max(10).optional(),
-      maxJobs: z.number().int().min(1).max(16).optional().describe('Total backend-job budget including retries and reassessments; default 6, maximum 16.'),
+      maxJobs: z.number().int().min(1).max(16).optional().describe('Total backend-job budget including retries and reassessments; default 8, maximum 16.'),
       maxRounds: z.number().int().min(1).max(8).optional().describe('Closed-loop optimization round budget for the optimization stage; default 3, maximum 8.'),
     }).strict(),
     execute: (args, ctx) => createResearchTask(ctx, args),

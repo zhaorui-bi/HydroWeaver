@@ -19,6 +19,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { atomicWriteJson } from '../fs-utils';
 import { resolveUserPath } from '../paths';
 import { resolveOpenAquaBackend, runBackend, type OpenAquaBackend } from './backend';
+import {
+  describeSimulationBackend,
+  probeSimulation,
+  resolveSimulationBackend,
+  simulationRunnerPath,
+} from './sim';
 import { cancelJob, getJob, readJobRunManifest, startJob, type JobSnapshot } from './jobs';
 import { createEngineeringJobRequest, type JsonValue } from './provenance';
 
@@ -30,7 +36,7 @@ export interface ResearchContext {
 }
 
 export type ResearchStatus = 'open' | 'running' | 'waiting' | 'ready' | 'cancelled';
-export type ResearchStage = 'readiness' | 'assessment' | 'retrieval' | 'recommendation' | 'optimization' | 'audit' | 'handoff';
+export type ResearchStage = 'readiness' | 'assessment' | 'retrieval' | 'recommendation' | 'optimization' | 'simulation' | 'audit' | 'handoff';
 type JobStage = Exclude<ResearchStage, 'readiness' | 'handoff'>;
 type ResearchResponse = 'amend_query' | 'continue_screening' | 'retry';
 
@@ -117,6 +123,15 @@ export interface ResearchTask {
     auditStatus?: 'pass' | 'warn' | 'fail';
     optimizationStatus?: 'feasible' | 'stalled' | 'budget_exhausted';
     optimizationFile?: string;
+    simulation?: {
+      status: 'optimal' | 'unconverged' | 'unsupported' | 'error' | 'skipped_unconfigured';
+      file?: string;
+      jobId?: string;
+      chainId?: string;
+      chain?: string[];
+      coverage?: { modeled: string[]; unsupported: string[] };
+      note?: string;
+    };
     limitations: string[];
     reportFile?: string;
     auditFile?: string;
@@ -136,14 +151,18 @@ const MAX_JSON_BYTES = 2_000_000;
 const MAX_QUERY_BYTES = 256_000;
 const MAX_EVENTS = 128;
 const MAX_REVISIONS = 16;
-const OPERATIONS = ['health', 'assess-case', 'retrieve', 'recommend', 'optimize', 'audit-report'];
+const OPERATIONS = ['health', 'assess-case', 'retrieve', 'recommend', 'optimize', 'simulate', 'audit-report'];
+// Tasks created before the simulation stage existed froze a mandate without the
+// simulate operation; both lists remain readable so old records still validate.
+const LEGACY_OPERATIONS = ['health', 'assess-case', 'retrieve', 'recommend', 'optimize', 'audit-report'];
 const STAGE_OPERATION: Record<JobStage, string> = {
-  assessment: 'assess-case', retrieval: 'retrieve', recommendation: 'recommend', optimization: 'optimize', audit: 'audit-report',
+  assessment: 'assess-case', retrieval: 'retrieve', recommendation: 'recommend',
+  optimization: 'optimize', simulation: 'simulate', audit: 'audit-report',
 };
 const STAGE_TOOL: Record<JobStage, string> = {
   assessment: 'hydroweaver_assess_case', retrieval: 'hydroweaver_retrieve_evidence',
   recommendation: 'hydroweaver_recommend', optimization: 'hydroweaver_optimize_trains',
-  audit: 'hydroweaver_audit_report',
+  simulation: 'hydroweaver_simulate_train', audit: 'hydroweaver_audit_report',
 };
 const SCIENCE_FIELDS = ['source_water', 'contaminants', 'water_quality', 'treatment_targets', 'constraints', 'context'];
 const LIMITATIONS = [
@@ -159,7 +178,7 @@ export function createResearchTask(ctx: ResearchContext, input: {
   const requestId = text(input.requestId, 'requestId', 256);
   const objective = text(input.objective, 'objective', 8_000);
   const topK = integer(input.topK ?? 3, 'topK', 1, 10);
-  const maxJobs = integer(input.maxJobs ?? 6, 'maxJobs', 1, 16);
+  const maxJobs = integer(input.maxJobs ?? 8, 'maxJobs', 1, 16);
   const maxRounds = integer(input.maxRounds ?? 3, 'maxRounds', 1, 8);
   const workDir = currentWorkDir(ctx);
   const query = readJson(resolveInput(input.queryFile, workDir), MAX_QUERY_BYTES);
@@ -273,6 +292,18 @@ export async function advanceResearchTask(ctx: ResearchContext, input: {
     if (!(await ensureReady(ctx, task, paths))) return task;
     if (task.stage === 'readiness') task.stage = 'assessment';
     if (task.stage === 'handoff') return task;
+    if (task.stage === 'simulation' && resolveSimulationBackend(ctx.env, ctx.homeDir) === undefined) {
+      task.scientificOutcome.simulation = {
+        status: 'skipped_unconfigured',
+        note: 'No simulation backend is configured; the mechanistic check was skipped, not performed.',
+      };
+      task.scientificOutcome.limitations.push(
+        'The WaterTAP simulation stage was skipped because no simulation backend is configured; this run contains no mechanistic hydraulic or energy verification.',
+      );
+      task.stage = 'audit';
+      event(task, 'simulation_skipped', 'No simulation backend is configured; the simulation stage is recorded as skipped and the workflow proceeds to the structural audit.');
+      return saveTask(task, paths);
+    }
     if (task.assignments.length >= task.mandate.maxJobs) {
       attention(task, 'budget_exhausted', 'The frozen job budget is exhausted. Create a separately authorized research task to expand scope.', []);
       return saveTask(task, paths);
@@ -446,11 +477,16 @@ async function launchAssignment(ctx: ResearchContext, task: ResearchTask, paths:
   const candidatesFile = stage === 'optimization'
     ? writeOptimizationCandidates(task, paths, task.assignments.length + 1)
     : undefined;
+  const simulation = stage === 'simulation'
+    ? prepareSimulationStage(ctx, task, paths, output)
+    : undefined;
   const args = stage === 'audit'
     ? ['audit-report', '--report-file', recommendationAssignment(task).output, '--output', output]
-    : stage === 'optimization'
-      ? [operation, '--query-file', queryPath, '--candidates-file', candidatesFile!, '--top-k', String(task.mandate.topK), '--max-rounds', String(task.mandate.maxRounds), '--output', output]
-      : [operation, '--query-file', queryPath, '--output', output];
+    : stage === 'simulation'
+      ? [simulation!.command[0]!, ...simulation!.command.slice(1)]
+      : stage === 'optimization'
+        ? [operation, '--query-file', queryPath, '--candidates-file', candidatesFile!, '--top-k', String(task.mandate.topK), '--max-rounds', String(task.mandate.maxRounds), '--output', output]
+        : [operation, '--query-file', queryPath, '--output', output];
   if (stage === 'recommendation') args.push('--top-k', String(task.mandate.topK));
   const previous = task.assignments.findLast((entry) => entry.stage === stage && entry.queryRevision === revision.revision);
   const assignment: ResearchAssignment = { id: `assignment_${String(task.assignments.length + 1)}`, stage, jobId, status: 'launching', queryRevision: revision.revision, output, createdAt: new Date().toISOString(), retryOf: previous?.id };
@@ -460,22 +496,36 @@ async function launchAssignment(ctx: ResearchContext, task: ResearchTask, paths:
   saveTask(task, paths);
   let spawnAttempted = false;
   try {
-    const backend: OpenAquaBackend = { command: frozen.command, source: frozen.source };
+    const simulationProvenance = stage === 'simulation'
+      ? await simulationStageProvenance(ctx, simulation!)
+      : undefined;
+    const backend: OpenAquaBackend = stage === 'simulation'
+      ? { command: simulation!.command, source: simulation!.backend.source }
+      : { command: frozen.command, source: frozen.source };
     const requestArgs: Record<string, unknown> = stage === 'audit'
       ? { reportFile: recommendationAssignment(task).output, output, researchTaskId: task.id, assignmentId: assignment.id, queryRevision: revision.revision }
-      : stage === 'optimization'
-        ? { queryFile: queryPath, candidatesFile, output, topK: task.mandate.topK, maxRounds: task.mandate.maxRounds, researchTaskId: task.id, assignmentId: assignment.id, queryRevision: revision.revision }
-        : { queryFile: queryPath, output, topK: stage === 'recommendation' ? task.mandate.topK : undefined, researchTaskId: task.id, assignmentId: assignment.id, queryRevision: revision.revision };
-    const provenance = createEngineeringJobRequest({ toolName: STAGE_TOOL[stage], operation, backend, backendVersion: frozen.version, args: requestArgs, workDir: task.mandate.workDir, scientificConfiguration: frozen.scientificConfiguration });
+      : stage === 'simulation'
+        ? { queryFile: queryPath, simulationInput: simulation!.inputPath, chainId: simulation!.train.chain_id, chain: simulation!.train.chain, output, researchTaskId: task.id, assignmentId: assignment.id, queryRevision: revision.revision }
+        : stage === 'optimization'
+          ? { queryFile: queryPath, candidatesFile, output, topK: task.mandate.topK, maxRounds: task.mandate.maxRounds, researchTaskId: task.id, assignmentId: assignment.id, queryRevision: revision.revision }
+          : { queryFile: queryPath, output, topK: stage === 'recommendation' ? task.mandate.topK : undefined, researchTaskId: task.id, assignmentId: assignment.id, queryRevision: revision.revision };
+    const provenance = createEngineeringJobRequest({ toolName: STAGE_TOOL[stage], operation, backend, backendVersion: stage === 'simulation' ? simulationProvenance?.backendVersion : frozen.version, args: requestArgs, workDir: task.mandate.workDir, scientificConfiguration: stage === 'simulation' ? simulationProvenance?.scientificConfiguration : frozen.scientificConfiguration });
     if (provenance.inputs.some((entry) => entry.kind !== 'file')) throw new Error('Research input is no longer a readable regular file.');
     const expectedInputHash = stage === 'audit' ? recommendationAssignment(task).outputSha256 : revision.normalized?.sha256 ?? revision.sha256;
-    if (stage === 'optimization') {
+    if (stage === 'simulation') {
+      if (provenance.inputs.length !== 2 || provenance.inputs[0]?.role !== 'query' || provenance.inputs[1]?.role !== 'simulation-input') throw new Error('The simulation stage requires exactly its frozen case and simulation-input files.');
+      if (provenance.inputs[0]?.sha256 !== expectedInputHash) throw new Error('The staged simulation case differs from its verified research dependency.');
+      if (provenance.inputs[1]?.sha256 !== fileHash(simulation!.inputPath, MAX_QUERY_BYTES)) throw new Error('The staged simulation input differs from the file written for this stage.');
+    } else if (stage === 'optimization') {
       if (provenance.inputs.length !== 2 || provenance.inputs[0]?.role !== 'query' || provenance.inputs[1]?.role !== 'candidate-chains') throw new Error('The optimization stage requires exactly its frozen query and candidate-train inputs.');
       if (provenance.inputs[0]?.sha256 !== expectedInputHash) throw new Error('The staged optimization query differs from its verified research dependency.');
       if (provenance.inputs[1]?.sha256 !== fileHash(candidatesFile!, MAX_QUERY_BYTES)) throw new Error('The staged optimization candidates differ from the verified recommendation trains.');
     } else if (provenance.inputs.length !== 1 || provenance.inputs[0]?.sha256 !== expectedInputHash) throw new Error('The staged job input differs from its verified research dependency.');
     spawnAttempted = true;
-    const job = startJob(ctx.jobsRoot, [...backend.command, ...args], { workDir: task.mandate.workDir, env: ctx.env, label: `research:${task.id}:${stage}`, provenance, jobId });
+    // The simulation command already carries its own interpreter and runner path;
+    // every other stage runs through the frozen OpenAqua backend command.
+    const command = stage === 'simulation' ? args : [...frozen.command, ...args];
+    const job = startJob(ctx.jobsRoot, command, { workDir: task.mandate.workDir, env: ctx.env, label: `research:${task.id}:${stage}`, provenance, jobId });
     assignment.status = job.status;
     assignment.requestSha256 = readJobRunManifest(ctx.jobsRoot, jobId)?.manifest?.requestSha256;
     event(task, 'submitted', `Started ${stage} as ${jobId}.`);
@@ -524,7 +574,7 @@ function observeAssignment(ctx: ResearchContext, task: ResearchTask, paths: Task
     verifyRevision(task, paths);
     verifyDependencies(ctx, task, paths);
     const payload = verifiedOutput(ctx, paths, job, assignment);
-    if (assignment.stage !== 'audit') verifyNormalized(task, paths, payload, assignment.stage);
+    if (assignment.stage !== 'audit' && assignment.stage !== 'simulation') verifyNormalized(task, paths, payload, assignment.stage);
     assignment.consumed = true;
     if (assignment.stage === 'assessment') consumeAssessment(task, payload);
     else if (assignment.stage === 'retrieval') {
@@ -539,6 +589,8 @@ function observeAssignment(ctx: ResearchContext, task: ResearchTask, paths: Task
       task.stage = 'optimization';
     } else if (assignment.stage === 'optimization') {
       consumeOptimization(task, assignment, payload);
+    } else if (assignment.stage === 'simulation') {
+      consumeSimulation(task, assignment, payload);
     } else consumeAudit(ctx, task, paths, assignment, payload);
     event(task, 'stage_completed', `Consumed verified ${assignment.stage} output from ${assignment.jobId}.`);
     if (task.status !== 'waiting' && task.status !== 'ready') task.status = 'open';
@@ -615,11 +667,150 @@ function consumeOptimization(task: ResearchTask, assignment: ResearchAssignment,
   task.scientificOutcome.optimizationStatus = status;
   task.scientificOutcome.optimizationFile = assignment.output;
   if (status === 'feasible') {
-    task.stage = 'audit';
+    task.stage = 'simulation';
     return;
   }
   task.scientificOutcome.status = 'review_required';
   attention(task, 'optimization_inconclusive', `The closed-loop optimization did not reach a feasible train set within its bounded round budget (${status}). Amend the case, or explicitly continue to the structural audit with this limitation recorded.`, ['amend_query', 'continue_screening'], { optimizationStatus: status, unresolved: boundedJson(optimization['unresolved']) });
+}
+
+interface SimulationStagePlan {
+  command: string[];
+  backend: { python: string; source: string };
+  backendVersion?: string;
+  inputPath: string;
+  train: { chain_id: string; chain: string[] };
+  scientificConfiguration: Record<string, JsonValue>;
+}
+
+function selectSimulationTrain(task: ResearchTask): { chain_id: string; chain: string[] } {
+  // Prefer the trains the closed loop actually certified as feasible; fall back
+  // to the recommendation shortlist when the optimization loop did not converge.
+  const optimizationFile = task.scientificOutcome.optimizationFile;
+  if (optimizationFile !== undefined) {
+    const record = readJson(optimizationFile, MAX_JSON_BYTES);
+    const trains = record['final_trains'];
+    if (Array.isArray(trains) && trains.length > 0 && isRecord(trains[0])) {
+      const first = trains[0];
+      const chain = first['chain'];
+      if (Array.isArray(chain) && chain.length > 0 && chain.every((unit) => typeof unit === 'string')) {
+        return {
+          chain_id: typeof first['chain_id'] === 'string' ? first['chain_id'] : 'optimized-train',
+          chain,
+        };
+      }
+    }
+  }
+  const report = readJson(recommendationAssignment(task).output, MAX_JSON_BYTES);
+  const recommendations = report['recommendations'];
+  if (Array.isArray(recommendations) && recommendations.length > 0 && isRecord(recommendations[0])) {
+    const first = recommendations[0];
+    const chain = first['chain'];
+    if (Array.isArray(chain) && chain.length > 0 && chain.every((unit) => typeof unit === 'string')) {
+      return {
+        chain_id: typeof first['chain_id'] === 'string' ? first['chain_id'] : 'recommended-train',
+        chain,
+      };
+    }
+  }
+  throw new Error('No verified treatment train is available to simulate.');
+}
+
+function prepareSimulationStage(
+  ctx: ResearchContext,
+  task: ResearchTask,
+  paths: TaskPaths,
+  output: string,
+): SimulationStagePlan {
+  const backend = resolveSimulationBackend(ctx.env, ctx.homeDir);
+  if (backend === undefined) {
+    throw new Error('The simulation backend is not configured; set HYDROWEAVER_SIM_PYTHON or ~/.hydroweaver/simulation.json.');
+  }
+  const revision = currentRevision(task);
+  const train = selectSimulationTrain(task);
+  const caseData = readJson(revision.normalized?.path ?? revision.path, MAX_QUERY_BYTES);
+  const inputPath = path.join(paths.artifacts, `${String(task.assignments.length + 1)}-simulation-input.json`);
+  atomicWriteJson(inputPath, {
+    schema_version: 1,
+    case: caseData,
+    train,
+    options: { property_package: 'NaCl', solver: 'ipopt' },
+  });
+  return {
+    command: [backend.python, simulationRunnerPath(ctx.env), 'simulate', '--input', inputPath, '--output', output],
+    backend: { python: backend.python, source: backend.source },
+    backendVersion: undefined,
+    inputPath,
+    train,
+    scientificConfiguration: {
+      simulation_backend: describeSimulationBackend(backend),
+      property_package: 'NaCl',
+      solver: 'ipopt',
+      runner: 'watertap',
+    },
+  };
+}
+
+async function simulationStageProvenance(
+  ctx: ResearchContext,
+  plan: SimulationStagePlan,
+): Promise<{ backendVersion?: string; scientificConfiguration: Record<string, JsonValue> }> {
+  const backend = resolveSimulationBackend(ctx.env, ctx.homeDir);
+  if (backend === undefined) return { scientificConfiguration: plan.scientificConfiguration };
+  const report = await probeSimulation(backend, 120_000, ctx.env);
+  if (report === undefined || !report.available) {
+    throw new Error(
+      `The simulation backend did not report WaterTAP/IDAES availability: ${report?.error ?? 'self-check returned no report'}`,
+    );
+  }
+  return {
+    backendVersion: report.versions['watertap'] ?? undefined,
+    scientificConfiguration: {
+      ...plan.scientificConfiguration,
+      watertap: report.versions['watertap'] ?? null,
+      idaes: report.versions['idaes-pse'] ?? null,
+      pyomo: report.versions['pyomo'] ?? null,
+      solver_available: report.solver.available,
+      supported_units: report.supportedUnits,
+    },
+  };
+}
+
+function consumeSimulation(task: ResearchTask, assignment: ResearchAssignment, payload: Record<string, unknown>): void {
+  if (payload['kind'] !== 'hydroweaver.simulation-result' || payload['schema_version'] !== 1) {
+    throw new Error('Simulation output does not match the closed-loop simulation contract.');
+  }
+  const status = String(payload['status']);
+  if (!['optimal', 'unconverged', 'unsupported', 'error'].includes(status)) {
+    throw new Error('Simulation output has an unknown status.');
+  }
+  const coverage = payload['coverage'];
+  const modeled = isRecord(coverage) && Array.isArray(coverage['modeled']) ? coverage['modeled'].map(String) : [];
+  const unsupported = isRecord(coverage) && Array.isArray(coverage['unsupported']) ? coverage['unsupported'].map(String) : [];
+  task.scientificOutcome.simulation = {
+    status: status as 'optimal' | 'unconverged' | 'unsupported' | 'error',
+    file: assignment.output,
+    jobId: assignment.jobId,
+    coverage: { modeled, unsupported },
+    note: typeof payload['error'] === 'string' ? payload['error'] : undefined,
+  };
+  if (status === 'optimal') {
+    task.stage = 'audit';
+    return;
+  }
+  if (status === 'unsupported') {
+    task.scientificOutcome.limitations.push(
+      'The top candidate train has no unit with a mechanistic model; the simulation stage reports it as unsupported rather than simulating a different train.',
+    );
+    task.stage = 'audit';
+    return;
+  }
+  task.scientificOutcome.limitations.push(
+    status === 'unconverged'
+      ? 'The WaterTAP solve did not reach an optimal termination; the mechanistic result is unconverged and must not be read as infeasible or as a performance value.'
+      : 'The simulation stage failed to build or solve the flowsheet; no mechanistic result is available for this run.',
+  );
+  task.stage = 'audit';
 }
 
 function writeOptimizationCandidates(task: ResearchTask, paths: TaskPaths, index: number): string {
@@ -766,13 +957,13 @@ function readTask(paths: TaskPaths, ctx: ResearchContext, allowForeignWorkspace 
   const value = readJson(paths.record, MAX_JSON_BYTES);
   if (value['kind'] !== 'hydroweaver.research-task' || value['schemaVersion'] !== 1 || value['id'] !== path.basename(paths.dir) || !Number.isSafeInteger(value['version']) || (value['version'] as number) < 1 || !isRecord(value['mandate']) || !Array.isArray(value['queryRevisions']) || !Array.isArray(value['assignments']) || !Array.isArray(value['attention']) || !Array.isArray(value['events'])) throw new Error('Research task does not match its versioned storage contract.');
   const task = value as unknown as ResearchTask;
-  if (!['open', 'running', 'waiting', 'ready', 'cancelled'].includes(task.status) || !['readiness', 'assessment', 'retrieval', 'recommendation', 'optimization', 'audit', 'handoff'].includes(task.stage) || !Number.isSafeInteger(task.eventCount) || task.eventCount < task.events.length || !isRecord(task.scientificOutcome)) throw new Error('Research lifecycle or event history is malformed.');
+  if (!['open', 'running', 'waiting', 'ready', 'cancelled'].includes(task.status) || !['readiness', 'assessment', 'retrieval', 'recommendation', 'optimization', 'simulation', 'audit', 'handoff'].includes(task.stage) || !Number.isSafeInteger(task.eventCount) || task.eventCount < task.events.length || !isRecord(task.scientificOutcome)) throw new Error('Research lifecycle or event history is malformed.');
   if (task.mandate.jobsRoot !== path.resolve(ctx.jobsRoot)) throw new Error('Research task belongs to a different frozen job store.');
   if (task.mandate.workDir !== currentWorkDir(ctx)) {
     if (allowForeignWorkspace) return undefined;
     throw new Error('Research task belongs to a different frozen workspace.');
   }
-  if (task.mandate.outputDir !== paths.artifacts || canonical(task.mandate.allowedOperations) !== canonical(OPERATIONS)) throw new Error('Research mandate paths or allowed operations were modified.');
+  if (task.mandate.outputDir !== paths.artifacts || (canonical(task.mandate.allowedOperations) !== canonical(OPERATIONS) && canonical(task.mandate.allowedOperations) !== canonical(LEGACY_OPERATIONS))) throw new Error('Research mandate paths or allowed operations were modified.');
   integer(task.mandate.maxJobs, 'stored maxJobs', 1, 16);
   integer(task.mandate.topK, 'stored topK', 1, 10);
   integer(task.mandate.maxRounds, 'stored maxRounds', 1, 8);
@@ -783,7 +974,7 @@ function readTask(paths: TaskPaths, ctx: ResearchContext, allowForeignWorkspace 
   }
   if (task.queryRevisions.length === 0 || task.queryRevisions.length > MAX_REVISIONS || task.assignments.length > task.mandate.maxJobs || task.events.length > MAX_EVENTS || task.attention.length > 64) throw new Error('Research record exceeds its frozen bounds.');
   for (const assignment of task.assignments) {
-    if (!JOB_ID.test(assignment.jobId) || !['assessment', 'retrieval', 'recommendation', 'optimization', 'audit'].includes(assignment.stage)) throw new Error('Invalid stored research assignment.');
+    if (!JOB_ID.test(assignment.jobId) || !['assessment', 'retrieval', 'recommendation', 'optimization', 'simulation', 'audit'].includes(assignment.stage)) throw new Error('Invalid stored research assignment.');
     contained(paths.artifacts, assignment.output);
   }
   const first = task.queryRevisions[0]!;
@@ -806,6 +997,12 @@ function verifyReadyTask(task: ResearchTask): void {
   const audit = completed.findLast((entry) => entry.stage === 'audit');
   const optimization = completed.findLast((entry) => entry.stage === 'optimization');
   if (task.stage !== 'handoff' || task.scientificOutcome.auditStatus !== 'pass' || audit === undefined || task.scientificOutcome.auditFile !== audit.output || optimization === undefined || task.scientificOutcome.optimizationFile !== optimization.output || !['assessment', 'retrieval', 'recommendation', 'optimization', 'audit'].every((stage) => completed.some((entry) => entry.stage === stage)) || task.scientificOutcome.reportFile !== recommendationAssignment(task).output) throw new Error('Research readiness has no complete verified stage, optimization, and audit lineage for the current query revision.');
+  const simulation = task.scientificOutcome.simulation;
+  if (simulation === undefined) throw new Error('Research readiness has no recorded simulation stage outcome for the current query revision.');
+  if (simulation.status !== 'skipped_unconfigured' && simulation.jobId !== undefined) {
+    const simulationAssignment = completed.findLast((entry) => entry.stage === 'simulation' && entry.jobId === simulation.jobId);
+    if (simulationAssignment === undefined || simulationAssignment.output !== simulation.file) throw new Error('The recorded simulation outcome does not match a verified simulation job for this revision.');
+  }
   if (task.scientificOutcome.optimizationStatus !== 'feasible' && currentRevision(task).conditionalScreening === undefined) throw new Error('Research readiness requires a feasible closed-loop optimization record or a caller-declared conditional screening decision.');
 }
 
