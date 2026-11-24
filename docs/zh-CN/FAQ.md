@@ -48,7 +48,7 @@
 
 ### HydroWeaver 与 Kimi Code 是什么关系？
 
-本项目 vendored 了 MIT 许可的 Kimi Code 引擎，但属于独立产品。OpenAqua 专属层位于 `engine/apps/hydroweaver`；直接运行上游 Kimi Code 时仍保持其原生身份和行为。
+本项目 vendored 了 MIT 许可的 Kimi Code 引擎，但属于独立产品。HydroWeaver 专属层位于 `engine/apps/hydroweaver`；直接运行上游 Kimi Code 时仍保持其原生身份和行为。
 
 ### 如何报告问题？
 

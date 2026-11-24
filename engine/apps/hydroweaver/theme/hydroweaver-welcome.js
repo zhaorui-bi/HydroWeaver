@@ -46,7 +46,7 @@
           'with retrieval augmentation and critic-based refinement. Water Research 308, ' +
           '126761. https://doi.org/10.1016/j.watres.2026.126761',
         bibtex:
-          '@article{liu2027hydroweaver,\n' +
+          '@article{liu2027openaqua,\n' +
           '  title = {OpenAqua: An automated multi-agent framework for early-stage water ' +
           'treatment train design with retrieval augmentation and critic-based ' +
           'refinement},\n' +
@@ -116,7 +116,7 @@
           'with retrieval augmentation and critic-based refinement. Water Research 308, ' +
           '126761. https://doi.org/10.1016/j.watres.2026.126761',
         bibtex:
-          '@article{liu2027hydroweaver,\n' +
+          '@article{liu2027openaqua,\n' +
           '  title = {OpenAqua: An automated multi-agent framework for early-stage water ' +
           'treatment train design with retrieval augmentation and critic-based ' +
           'refinement},\n' +

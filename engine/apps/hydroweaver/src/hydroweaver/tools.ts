@@ -695,7 +695,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
       `Run OpenAqua’s WContBench treatment-train metrics: macro precision, recall, F1, coverage, hit rate, and case-level acceptability. Benchmark directories come from the OpenAqua Hugging Face dataset. ${PATH_NOTE}`,
     inputSchema: {
       benchmarkDir: nonEmptyPath,
-      predictions: nonEmptyPath.describe('Prediction JSON or JSONL accepted by test_hydroweaver.py.'),
+      predictions: nonEmptyPath.describe('Prediction JSON or JSONL accepted by test_openaqua.py.'),
       output: nonEmptyPath.optional(),
       ...waitShape,
     },

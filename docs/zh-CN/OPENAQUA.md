@@ -44,7 +44,7 @@ OpenAqua 是一个检索增强、带批评式精炼（critic-based refinement）
 路线的盲评（S5）、LLM 评审的可靠性分析（S6）、真实案例回放评估（S7）
 以及新兴污染物情景验证（S8）。
 
-## 与本 HydroWeaver 的关系
+## 与 HydroWeaver 的关系
 
 HydroWeaver 不包含 OpenAqua 源码、处理后的知识库或 WContBench
 ——接入方式见 [FAQ](../FAQ.md)。HydroWeaver 提供围绕 OpenAqua 工作流的
@@ -62,7 +62,7 @@ CLI、桌面端与 Web 工作台、会话管理与研究任务规范。其输出
 > 308, 126761. <https://doi.org/10.1016/j.watres.2026.126761>
 
 ```bibtex
-@article{liu2027hydroweaver,
+@article{liu2027openaqua,
   title = {OpenAqua: An automated multi-agent framework for early-stage water treatment train design with retrieval augmentation and critic-based refinement},
   author = {Liu, Hanzhang and Jiang, Zhaorui and Zhong, Huiling and Li, Jinshuo and Pang, Wei and Yuan, Yingfang},
   journal = {Water Research},

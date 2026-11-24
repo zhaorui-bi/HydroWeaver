@@ -48,7 +48,7 @@ export HYDROWEAVER_COMMAND='["python","/path/to/adapter-compatible-cli.py"]'
 ```
 
 A valid checkout contains `water_treatment_agent/requirements.txt`,
-`water_treatment_agent/app/workflows/pipeline.py`, `test_hydroweaver.py`, and
+`water_treatment_agent/app/workflows/pipeline.py`, `test_openaqua.py`, and
 `test_retrieval.py`.
 
 ### The wrong Python interpreter is selected
@@ -87,8 +87,8 @@ python -m pip install -U huggingface_hub
 hf download zhaorui-bi/OpenAqua data.zip WContBench/ \
   --repo-type dataset \
   --revision cc2d3c620e8ada7c62fa922cf3a827d8b42889e3 \
-  --local-dir ../hf_hydroweaver
-unzip ../hf_hydroweaver/data.zip -d .
+  --local-dir ../hf_openaqua
+unzip ../hf_openaqua/data.zip -d .
 ```
 
 The ZIP already contains `data/`; extracting it with `-d data` creates the

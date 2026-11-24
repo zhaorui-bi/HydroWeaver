@@ -33,5 +33,5 @@ JSON/data files outside sensitive directories.
 
 The application stores configuration and job logs locally. These may contain
 provider details, file paths, water-quality inputs, facility constraints,
-retrieved evidence, model output, or other confidential research metadata. Keep the HydroWeaver home and job directories private and do
-not commit them.
+retrieved evidence, model output, or other confidential research metadata. Keep
+the HydroWeaver home and job directories private and do not commit them.

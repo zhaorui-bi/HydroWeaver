@@ -468,7 +468,7 @@ class OpenAquaAdapterTests(unittest.TestCase):
 
     def test_treatment_evaluator_modules_with_dataclasses_load_correctly(self) -> None:
         self._write(
-            self.repo / "test_hydroweaver.py",
+            self.repo / "test_openaqua.py",
             """
             from dataclasses import asdict, dataclass
 

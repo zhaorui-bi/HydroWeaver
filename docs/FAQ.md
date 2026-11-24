@@ -11,13 +11,13 @@ packaging.
 
 ### Does this repository include OpenAqua and its dataset?
 
-No. The HydroWeaver includes an adapter, not the OpenAqua source, Python
+No. HydroWeaver includes an adapter, not the OpenAqua source, Python
 dependencies, processed knowledge base, or WContBench. Clone OpenAqua separately
 and download `zhaorui-bi/OpenAqua` from Hugging Face.
 
 ### Why are there two model configurations?
 
-The Kimi Code engine-based HydroWeaver needs a conversational model to plan and call tools.
+HydroWeaver, built on the Kimi Code engine, needs a conversational model to plan and call tools.
 OpenAqua optionally uses OpenRouter for natural-language parsing, planning, and
 explanation. They are separate credentials. OpenAqua can run fallback logic
 without `OPENROUTER_API_KEY`, but natural-language quality is lower.
@@ -32,7 +32,7 @@ or private provider and follow your organization’s data policy.
 ### How is the backend located?
 
 Use `hydroweaver onboard --hydroweaver-repo /path/to/OpenAqua`, set
-`HYDROWEAVER_REPO`, or provide an adapter-compatible `HYDROWEAVER_COMMAND`. The
+`HYDROWEAVER_REPO`, or provide an adapter-compatible `HYDROWEAVER_COMMAND`.
 HydroWeaver recognizes virtual environments at the repository root and under
 `water_treatment_agent/`; `HYDROWEAVER_PYTHON` overrides interpreter selection.
 
@@ -100,7 +100,7 @@ reading and session browsing.
 ### How is HydroWeaver related to Kimi Code?
 
 It vendors the MIT-licensed Kimi Code engine but is an independent product. The
-OpenAqua-specific layer lives under `engine/apps/hydroweaver`; directly
+HydroWeaver-specific layer lives under `engine/apps/hydroweaver`; directly
 running the upstream Kimi Code client keeps its native identity and behavior.
 
 ### How do I report an issue?

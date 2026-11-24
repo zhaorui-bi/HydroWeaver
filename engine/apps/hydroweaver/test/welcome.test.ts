@@ -30,7 +30,7 @@ it('preserves drafts, allows manual copying, and updates the welcome language', 
   await flush();
   const manualCopy = document.querySelector<HTMLTextAreaElement>('.oa-welcome-cite textarea')!;
   expect(manualCopy.hidden).toBe(false);
-  expect(manualCopy.value).toContain('@article{liu2027hydroweaver,\n  title');
+  expect(manualCopy.value).toContain('@article{liu2027openaqua,\n  title');
   expect(manualCopy.value).not.toContain('\\n');
   expect(document.querySelector('.oa-welcome-cite [role="status"]')!.textContent).toContain('Could not copy');
 

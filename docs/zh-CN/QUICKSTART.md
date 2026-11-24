@@ -2,7 +2,7 @@
 
 # 快速上手
 
-本指南完成 HydroWeaver 安装、OpenAqua 后端连接、知识库下载与首次闭环查询、OpenAqua 后端连接、知识库下载和第一次查询。
+本指南完成 HydroWeaver 安装、OpenAqua 后端连接、知识库下载与首次闭环查询。
 
 ## 1. 环境要求
 
@@ -35,13 +35,13 @@ python -m pip install -U huggingface_hub
 hf download zhaorui-bi/OpenAqua data.zip WContBench/ \
   --repo-type dataset \
   --revision cc2d3c620e8ada7c62fa922cf3a827d8b42889e3 \
-  --local-dir ../hf_hydroweaver
-unzip ../hf_hydroweaver/data.zip -d .
+  --local-dir ../hf_openaqua
+unzip ../hf_openaqua/data.zip -d .
 ```
 
 压缩包已包含顶层 `data/`，请解压到 `water_treatment_agent`；解压到已有的 `data/` 会产生错误的 `data/data/` 目录。上述 Git 与数据集修订版是本 HydroWeaver 版本的验证基线；如需升级，请记录新修订版并重新运行验证。
 
-WContBench 位于 `../hf_hydroweaver/WContBench/`。
+WContBench 位于 `../hf_openaqua/WContBench/`。
 
 ## 4. 配置 HydroWeaver 与后端
 

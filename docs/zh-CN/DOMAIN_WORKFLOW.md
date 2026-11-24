@@ -34,7 +34,7 @@ HydroWeaver 以水处理案例为工作单元，围绕 OpenAqua 五智能体流�
 
 这些步骤通过工具和智能体操作指引组织。`recommend` 保持可直接调用；
 它不是一个能阻止所有越级操作的强制状态机。CLI 的 `run`/`chat` 显式激活
-OpenAqua 操作技能；Web/桌面使用领域指引；TUI 可用 `/hydroweaver` 激活同一技能。
+`hydroweaver` 操作技能；Web/桌面使用领域指引；TUI 可用 `/hydroweaver` 激活同一技能。
 
 `blocked` 表示存在关键问题，应先澄清，或明确限定为探索性检索。
 `needs_information` 表示仍缺重要信息；应优先补全，条件性技术清单不能被表述为

@@ -33,7 +33,7 @@ export HYDROWEAVER_REPO=/absolute/path/to/OpenAqua
 ```
 
 有效仓库应包含 `water_treatment_agent/requirements.txt`、
-`water_treatment_agent/app/workflows/pipeline.py`、`test_hydroweaver.py` 和
+`water_treatment_agent/app/workflows/pipeline.py`、`test_openaqua.py` 和
 `test_retrieval.py`。
 
 ### 选择了错误的 Python
@@ -65,8 +65,8 @@ python -m pip install -U huggingface_hub
 hf download zhaorui-bi/OpenAqua data.zip WContBench/ \
   --repo-type dataset \
   --revision cc2d3c620e8ada7c62fa922cf3a827d8b42889e3 \
-  --local-dir ../hf_hydroweaver
-unzip ../hf_hydroweaver/data.zip -d .
+  --local-dir ../hf_openaqua
+unzip ../hf_openaqua/data.zip -d .
 ```
 
 压缩包已经包含 `data/`；若使用 `-d data`，会错误地产生 `data/data/`。

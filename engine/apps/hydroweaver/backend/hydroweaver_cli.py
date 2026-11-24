@@ -1299,7 +1299,7 @@ def load_script_module(path: Path, name: str) -> Any:
 
 
 def command_evaluate_trains(repo: Path, args: argparse.Namespace) -> dict[str, Any]:
-    module = load_script_module(repo / "test_hydroweaver.py", "_hydroweaver_train_evaluation")
+    module = load_script_module(repo / "test_openaqua.py", "_hydroweaver_train_evaluation")
     return module.evaluate_predictions(
         resolve_external_path(args.benchmark_dir), resolve_external_path(args.predictions)
     )

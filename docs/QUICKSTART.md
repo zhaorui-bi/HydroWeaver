@@ -42,15 +42,15 @@ python -m pip install -U huggingface_hub
 hf download zhaorui-bi/OpenAqua data.zip WContBench/ \
   --repo-type dataset \
   --revision cc2d3c620e8ada7c62fa922cf3a827d8b42889e3 \
-  --local-dir ../hf_hydroweaver
-unzip ../hf_hydroweaver/data.zip -d .
+  --local-dir ../hf_openaqua
+unzip ../hf_openaqua/data.zip -d .
 ```
 
 Because the archive already contains `data/`, extract it into
 `water_treatment_agent`; extracting into `data/` would create an invalid
 `data/data/` tree. The pinned Git and dataset revisions are this HydroWeaver
 release’s validation baseline. If you update either, record the new revision
-and rerun validation. The benchmark remains under `../hf_hydroweaver/WContBench/`.
+and rerun validation. The benchmark remains under `../hf_openaqua/WContBench/`.
 
 ## 4. Configure HydroWeaver and the backend
 

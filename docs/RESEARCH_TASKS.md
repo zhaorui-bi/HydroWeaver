@@ -64,7 +64,7 @@ the frozen query and the candidate-train file as inputs.
 ## Start a task without a conversational model
 
 The controller reads JSON and returns JSON. Task creation, listing, status, and
-responses do not require a Harness chat-model session. Backend execution still
+responses do not require a HydroWeaver chat-model session. Backend execution still
 uses the configured OpenAqua runtime and, where configured, its model services.
 Install the backend and data using the [quick start](./QUICKSTART.md) first.
 
@@ -199,7 +199,7 @@ the handoff and arrange independent scientific review.
 Every CLI action accepts `--input FILE` with the corresponding MCP JSON schema.
 Input must be a regular UTF-8 JSON object of at most 64 KiB; unknown command fields are
 rejected. Relative input and query paths resolve from `HYDROWEAVER_WORKDIR`, or the
-current workspace when unset. `--home DIR` selects Harness backend configuration.
+current workspace when unset. `--home DIR` selects HydroWeaver backend configuration.
 
 | CLI action / MCP tool | Input |
 | --- | --- |
@@ -226,10 +226,10 @@ instead of reporting a successful cancellation.
 
 The design learns from the MIT-licensed research prototype
 [`deepseek-ai/dsh-superagent-prototype` at `6337fc8`](https://github.com/deepseek-ai/dsh-superagent-prototype/tree/6337fc823ce20251c8de8085948165c81aaa701e).
-OpenAqua implements its own domain-specific controller; no source code or new
+HydroWeaver implements its own domain-specific controller; no source code or new
 runtime dependency from that project is bundled.
 
-| Reference concept | OpenAqua adaptation |
+| Reference concept | HydroWeaver adaptation |
 | --- | --- |
 | [Ticket and Assignment](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/6337fc823ce20251c8de8085948165c81aaa701e/src/core/model.ts) | A durable research work item with separate backend-job attempts. |
 | [Mandate and context](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/6337fc823ce20251c8de8085948165c81aaa701e/docs/002-authorization.md) | Declared scope and input revisions; material received as context grants no new authority. |

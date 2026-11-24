@@ -25,7 +25,7 @@ and downloaded data are required only for real pipeline integration tests.
 - Keep product work under `engine/apps/hydroweaver`, the root Electron
   shell, packaging, scripts, or documentation whenever possible.
 - Avoid changing upstream Kimi Code behavior unless the change is independently
-  suitable for upstream; branded behavior must remain gated by the OpenAqua
+  suitable for upstream; branded behavior must remain gated by the HydroWeaver
   host identity.
 - Do not edit generated `dist/` or `web-ui/` files directly.
 - Treat `build/logo.png` as the canonical brand source and regenerate derived

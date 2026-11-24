@@ -155,7 +155,7 @@ function isOpenAquaRepository(repo: string): boolean {
   return (
     existsSync(path.join(repo, 'water_treatment_agent', 'requirements.txt')) &&
     existsSync(path.join(repo, 'water_treatment_agent', 'app', 'workflows', 'pipeline.py')) &&
-    existsSync(path.join(repo, 'test_hydroweaver.py')) &&
+    existsSync(path.join(repo, 'test_openaqua.py')) &&
     existsSync(path.join(repo, 'test_retrieval.py'))
   );
 }

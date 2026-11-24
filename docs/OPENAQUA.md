@@ -75,7 +75,7 @@ report the exact software, dataset, index, and model versions used:
 > 308, 126761. <https://doi.org/10.1016/j.watres.2026.126761>
 
 ```bibtex
-@article{liu2027hydroweaver,
+@article{liu2027openaqua,
   title = {OpenAqua: An automated multi-agent framework for early-stage water treatment train design with retrieval augmentation and critic-based refinement},
   author = {Liu, Hanzhang and Jiang, Zhaorui and Zhong, Huiling and Li, Jinshuo and Pang, Wei and Yuan, Yingfang},
   journal = {Water Research},

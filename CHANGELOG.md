@@ -58,6 +58,10 @@ versioning.
 
 ### Repository maintenance
 
+- Replaced the legacy droplet mark with new HydroWeaver brand artwork (woven
+  droplet, two-tone wordmark) and regenerated every application icon from it;
+  the framework diagram and both workbench screenshots now show HydroWeaver
+  branding.
 - Regenerated third-party notices and the SBOM for the renamed product
   packages and artifact names.
 - Rewrote the README, quick start, architecture, research-task, FAQ,
@@ -117,9 +121,9 @@ versioning.
 
 ### Added
 
-- Complete HydroWeaver product shell with CLI, TUI, Web, and Electron
+- Complete OpenAqua Harness product shell with CLI, TUI, Web, and Electron
   desktop interfaces based on the open-source Kimi Code engine.
-- Bundled `hydroweaver_cli.py` adapter over the OpenAqua Parser → Retriever →
+- Bundled `openaqua_cli.py` adapter over the OpenAqua Parser → Retriever →
   Planner → Critic → Explanation workflow, with clean JSON stdout, current
   WContBench evidence-layout compatibility, and evaluator-module isolation.
 - MCP tools for status, taxonomy browsing, query normalization, recommendation,
@@ -166,5 +170,6 @@ versioning.
   expert, regulatory, laboratory, pilot, and site-specific review.
 
 [Unreleased]: https://github.com/zhaorui-bi/HydroWeaver/commits/main
+[0.2.0-beta.1]: https://github.com/zhaorui-bi/HydroWeaver/tree/v0.2.0-beta.1
 [0.1.0-beta.2]: https://github.com/zhaorui-bi/HydroWeaver/compare/6acc5252aff11946f6be8eca23882662ba4e8cb8...main
 [0.1.0-beta.1]: https://github.com/zhaorui-bi/HydroWeaver/tree/6acc5252aff11946f6be8eca23882662ba4e8cb8

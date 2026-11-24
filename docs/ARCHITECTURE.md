@@ -44,7 +44,7 @@ over the original 18 independent operations.
 
 ## Python adapter boundary
 
-OpenAqua does not expose one unified CLI, so the Harness ships
+OpenAqua does not expose one unified CLI, so HydroWeaver ships
 `backend/hydroweaver_cli.py`. It adds a stable JSON-oriented command contract:
 
 ```text
@@ -194,7 +194,7 @@ its authenticated loopback URL.
 - POSIX process groups / Windows process trees terminated on restart or quit;
 - production developer tools hidden unless `HYDROWEAVER_DEBUG=1`.
 
-Desktop configuration and Harness home files use private permissions and atomic
+Desktop configuration and HydroWeaver home files use private permissions and atomic
 writes. The packaged app can import an existing `~/.hydroweaver` provider/backend
 configuration without overwriting an initialized desktop home.
 
@@ -224,15 +224,15 @@ fonts. Generated `web-ui/` files are not edited manually.
 
 ## Configuration separation
 
-- `HYDROWEAVER_HOME` stores Harness model/MCP/backend configuration.
+- `HYDROWEAVER_HOME` stores HydroWeaver model/MCP/backend configuration.
 - `HYDROWEAVER_WORKDIR` is the default agent workspace and output base.
 - `HYDROWEAVER_JOBS_DIR` controls durable job metadata.
 - `HYDROWEAVER_REPO` points to external scientific code.
-- `OPENROUTER_API_KEY` is consumed by OpenAqua, not by the Harness provider
+- `OPENROUTER_API_KEY` is consumed by OpenAqua, not by HydroWeaver’s provider
   subsystem unless separately configured there.
 
 Directly launched Kimi Code remains independent because the branded host is
-activated only when `HYDROWEAVER_TUI=1` or the OpenAqua host identity is supplied.
+activated only when `HYDROWEAVER_TUI=1` or the HydroWeaver host identity is supplied.
 
 ## Quality gates
 
