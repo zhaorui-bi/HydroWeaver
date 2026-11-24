@@ -86,8 +86,8 @@ jobs:
           const catalog = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
           const expected = JSON.parse(fs.readFileSync(process.argv[4], 'utf8')).version;
           assert.equal(version, expected);
-          assert.equal(catalog.tools.length, 25);
-          assert.equal(new Set(catalog.tools.map((tool) => tool.name)).size, 25);
+          assert.equal(catalog.tools.length, 26);
+          assert.equal(new Set(catalog.tools.map((tool) => tool.name)).size, 26);
           const logTool = catalog.tools.find((tool) => tool.name === 'hydroweaver_job_log');
           assert.ok(logTool.parameters.includes('cursor'));
           assert.ok(logTool.parameters.includes('view'));

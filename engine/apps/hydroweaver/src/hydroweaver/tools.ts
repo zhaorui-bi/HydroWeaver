@@ -1,4 +1,5 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -28,6 +29,13 @@ import {
 } from './jobs';
 import { createEngineeringJobRequest } from './provenance';
 import { RESEARCH_TOOLS } from './research-tools';
+import {
+  describeSimulationBackend,
+  probeSimulation,
+  resolveSimulationBackend,
+  simulationRunnerPath,
+  simulationSetupGuidance,
+} from './sim';
 
 export interface ToolContext {
   readonly homeDir?: string;
@@ -413,6 +421,25 @@ function outputPath(args: Record<string, unknown>, workDir: string, label: strin
   return path.join(workDir, 'hydroweaver-output', `${label}_${stamp}_${nonce}.json`);
 }
 
+function timestampStamp(): string {
+  return new Date().toISOString().replaceAll(/[-:.TZ]/g, '').slice(0, 14);
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry)).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .toSorted(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+    .join(',')}}`;
+}
+
+function writeSimulationInput(filePath: string, payload: unknown): void {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
 function inlineJsonArgument(value: unknown, label: string): string | ToolResult {
   const rendered = JSON.stringify(value);
   if (Buffer.byteLength(rendered) > MAX_INLINE_JSON_BYTES) {
@@ -428,7 +455,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     name: 'hydroweaver_status',
     title: 'HydroWeaver status',
     description:
-      'Inspect the configured OpenAqua checkout, Python runtime, core dependencies, downloaded knowledge assets, indexes, and optional OpenRouter configuration. Run this before using the pipeline on a new machine.',
+      'Inspect the configured OpenAqua checkout, Python runtime, core dependencies, downloaded knowledge assets, indexes, optional OpenRouter configuration, and the optional WaterTAP simulation backend. Run this before using the pipeline on a new machine.',
     inputSchema: {},
     async run(_args, ctx) {
       const backend = backendOrError(ctx);
@@ -442,6 +469,11 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
         }),
       ]);
       const healthPayload = parseJson(health.stdout);
+      const simulationBackend = resolveSimulationBackend(ctx.env, ctx.homeDir);
+      const simulation =
+        simulationBackend === undefined
+          ? { available: false, backend: describeSimulationBackend(undefined), guidance: simulationSetupGuidance() }
+          : { available: (await probeSimulation(simulationBackend))?.available === true, backend: describeSimulationBackend(simulationBackend) };
       return ok({
         available: version.code === 0 && health.code === 0,
         readyForRecommendation:
@@ -449,6 +481,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
         backend: describeBackend(backend),
         version: commandReport(version),
         health: commandReport(health),
+        simulation,
       });
     },
   },
@@ -632,6 +665,119 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
       const maxRounds = typeof args['maxRounds'] === 'number' ? args['maxRounds'] : 3;
       argv.push('--top-k', String(topK), '--max-rounds', String(maxRounds), '--output', output);
       return launchJob(ctx, argv, 'hydroweaver_optimize_trains', 'optimize', { ...args, output });
+    },
+  },
+  {
+    name: 'hydroweaver_simulate_train',
+    title: 'Simulate a treatment train with WaterTAP',
+    description:
+      'Build the declared treatment train as a WaterTAP/IDAES flowsheet and solve it with IPOPT. Returns per-unit results (pump outlet pressure and power, membrane recovery, permeate salinity, membrane area), flowsheet totals (product and concentrate flows, recovery, specific energy), solver status, the unit coverage decision, and the WaterTAP/IDAES/Pyomo versions used. Scientific scope: the MVP property package models water and sodium chloride, so results describe salinity-driven hydraulics and energy — they do NOT predict trace-contaminant rejection or target attainment, and units without a mechanistic model (for example adsorption, coagulation, chlorination) are reported as unsupported instead of simulated. An unconverged solver status means unconverged, not infeasible. Requires a configured simulation backend (HYDROWEAVER_SIM_PYTHON); see docs/SIMULATION.md.',
+    inputSchema: {
+      queryFile: nonEmptyPath.describe(`JSON file containing the OpenAqua UserQuery case (source_water, water_quality, treatment_targets, constraints). ${PATH_NOTE}`),
+      chain: z.array(shortText).min(1).max(64).describe('Ordered treatment-unit names of the candidate train, for example ["Pumping", "Reverse Osmosis"].'),
+      chainId: z.string().trim().min(1).max(256).optional().describe('Identifier recorded with the train; a stable id is generated when absent.'),
+      waterRecovery: z.number().min(0.05).max(0.95).optional().describe('Declared water-recovery target for the last membrane; default 0.5.'),
+      feedSalinityGL: z.number().nonnegative().optional().describe('Feed salinity in g/L NaCl-equivalent; declared case TDS is used when absent.'),
+      designFlowM3Day: z.number().positive().optional().describe('Design feed flow in m3/day; the declared case value or a nominal 100 m3/day basis is used when absent.'),
+      output: nonEmptyPath.optional().describe('Simulation result JSON path. A timestamped workspace path is used by default.'),
+      ...waitShape,
+    },
+    async run(args, ctx) {
+      const backend = resolveSimulationBackend(ctx.env, ctx.homeDir);
+      if (backend === undefined) {
+        return fail('The simulation backend is not configured.', {
+          how_to_fix: simulationSetupGuidance(),
+        });
+      }
+      const workDir = jobWorkDir(ctx);
+      const casePath = resolveJobPath(String(args['queryFile']), workDir);
+      let caseData: unknown;
+      try {
+        caseData = JSON.parse(readFileSync(casePath, 'utf8')) as unknown;
+      } catch (error) {
+        return fail('The simulation case file could not be read as JSON.', {
+          detail: error instanceof Error ? error.message : String(error),
+          queryFile: casePath,
+        });
+      }
+      const chain = (args['chain'] as string[]).map((unit) => unit.trim()).filter((unit) => unit !== '');
+      if (chain.length === 0) return fail('chain must contain at least one non-empty unit name.');
+      const inputPath = path.join(workDir, 'hydroweaver-output', `simulate-input_${timestampStamp()}_${randomBytes(6).toString('hex')}.json`);
+      const output = outputPath(args, workDir, 'simulation');
+      const options: Record<string, unknown> = { property_package: 'NaCl', solver: 'ipopt' };
+      if (typeof args['waterRecovery'] === 'number') options['water_recovery'] = args['waterRecovery'];
+      if (typeof args['feedSalinityGL'] === 'number') options['feed_salinity_g_L'] = args['feedSalinityGL'];
+      if (typeof args['designFlowM3Day'] === 'number') options['design_flow_m3_day'] = args['designFlowM3Day'];
+      const payload = {
+        schema_version: 1,
+        case: caseData,
+        train: {
+          chain_id: typeof args['chainId'] === 'string' ? args['chainId'] : `train_${createHash('sha256').update(canonicalJson(chain)).digest('hex').slice(0, 12)}`,
+          chain,
+        },
+        options,
+      };
+      writeSimulationInput(inputPath, payload);
+      const selfCheck = await probeSimulation(backend);
+      if (selfCheck === undefined || !selfCheck.available) {
+        return fail('The simulation backend did not report WaterTAP/IDAES availability.', {
+          backend: describeSimulationBackend(backend),
+          detail: selfCheck?.error ?? 'self-check returned no report',
+          how_to_fix: simulationSetupGuidance(),
+        });
+      }
+      const command = [backend.python, simulationRunnerPath(), 'simulate', '--input', inputPath, '--output', output];
+      let provenance: ReturnType<typeof createEngineeringJobRequest>;
+      try {
+        provenance = createEngineeringJobRequest({
+          toolName: 'hydroweaver_simulate_train',
+          operation: 'simulate',
+          backend: { command: [backend.python, simulationRunnerPath()], source: backend.source },
+          backendVersion: selfCheck.versions['watertap'] ?? undefined,
+          args: { queryFile: casePath, chain, chainId: payload.train.chain_id, output, options: payload.options },
+          workDir,
+          scientificConfiguration: {
+            watertap: selfCheck.versions['watertap'] ?? null,
+            idaes: selfCheck.versions['idaes-pse'] ?? null,
+            pyomo: selfCheck.versions['pyomo'] ?? null,
+            solver: 'ipopt',
+            property_package: 'NaCl',
+            supported_units: selfCheck.supportedUnits,
+          },
+        });
+      } catch (error) {
+        return fail('Could not record the simulation request.', {
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      let job: JobSnapshot;
+      try {
+        job = startJob(ctx.jobsRoot, command, {
+          workDir,
+          env: ctx.env,
+          label: 'simulate',
+          provenance,
+        });
+      } catch (error) {
+        return fail('Could not start the simulation job.', {
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (args['wait'] !== true) {
+        return ok({
+          status: 'started',
+          job: publicJob(job),
+          next: `Use hydroweaver_job_status(jobId="${job.id}") and hydroweaver_job_manifest(jobId="${job.id}") to follow the run.`,
+        });
+      }
+      const timeoutMs = typeof args['waitTimeoutMs'] === 'number' ? args['waitTimeoutMs'] : 600_000;
+      const finished = await waitForJob(ctx.jobsRoot, job.id, timeoutMs);
+      const finalJob = finished ?? job;
+      const payloadOut = { job: publicJob(finalJob), log_tail: jobLog(ctx.jobsRoot, job.id) ?? '' };
+      if (finalJob.status === 'failed' || finalJob.status === 'cancelled') {
+        return fail(`Simulation job ${finalJob.status}.`, payloadOut);
+      }
+      return ok(payloadOut);
     },
   },
   {

@@ -30,7 +30,7 @@ const client = new Client({ name: 'hydroweaver-mcp-smoke', version: '1.0.0' });
 try {
   await client.connect(transport);
   const catalog = await client.listTools();
-  assert(catalog.tools.length === 25, `expected 25 tools, found ${String(catalog.tools.length)}`);
+  assert(catalog.tools.length === 26, `expected 26 tools, found ${String(catalog.tools.length)}`);
   assert(
     new Set(catalog.tools.map((tool) => tool.name)).size === catalog.tools.length,
     'tool names are not unique',

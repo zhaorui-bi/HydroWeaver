@@ -71,7 +71,7 @@ knowledge data.
 | --- | --- |
 | **Closed-loop optimization** | `hydroweaver_optimize_trains` runs the critique → revision → regeneration loop with a bounded round budget, per-round constraint reports, a structured planner revision directive, and an explicit convergence status (`feasible`, `stalled`, `budget_exhausted`). |
 | **Five-agent scientific pipeline** | Query normalization, hybrid evidence retrieval, taxonomy-constrained planning, rule-based critique, and evidence-bound explanations through the OpenAqua backend. |
-| **Focused MCP surface** | 25 tools for gated research tasks, runtime readiness, scientific case assessment, closed-loop optimization, recommendation auditing, taxonomy, recommendation, retrieval, constraint checking, indexing, knowledge staging, WContBench evaluation, and durable job control. |
+| **Focused MCP surface** | 26 tools for gated research tasks, runtime readiness, scientific case assessment, closed-loop optimization, mechanistic train simulation, recommendation auditing, taxonomy, recommendation, retrieval, constraint checking, indexing, knowledge staging, WContBench evaluation, and durable job control. |
 | **Persistent research tasks** | Frozen case revisions, declared scope, structured information needs, bounded job and round budgets, and recoverable readiness → assessment → retrieval → recommendation → optimization → audit → handoff stages. |
 | **Three user interfaces** | Full terminal UI, lightweight CLI/REPL, local browser UI, and an Electron desktop shell backed by the same harness. |
 | **Durable engineering jobs** | Long operations survive session closure and expose lifecycle state, bounded logs, output metadata, input hashes, payload hashes, and request fingerprints. |
@@ -385,6 +385,7 @@ Useful onboarding flags include `--hydroweaver-repo DIR`,
 | `hydroweaver_assess_case` | Build a structured case state and prioritize critical missing information before recommendation. |
 | `hydroweaver_recommend` | Run Parser → Retriever → Planner → Critic → Explanation. |
 | `hydroweaver_optimize_trains` | Run the closed-loop optimization: critique, keep auto-revisions, regenerate through the planner with a revision directive on stall, and stop at feasibility, stall, or the round budget. Returns per-round constraint reports and the feasible trains. |
+| `hydroweaver_simulate_train` | Build a candidate train as a WaterTAP/IDAES flowsheet and solve it with IPOPT: per-unit pressure/power/recovery/area, flowsheet totals, solver status, unit coverage, and package versions. Salinity-driven hydraulics and energy only — not trace-contaminant rejection. Requires the optional simulation backend. |
 | `hydroweaver_retrieve_evidence` | Return normalized query plus unit/case retrieval evidence. |
 | `hydroweaver_check_constraints` | Apply taxonomy, disinfection, brine, and energy rules to candidate trains. |
 | `hydroweaver_build_indexes` | Rebuild `corpus.jsonl` and the BM25 index. |
@@ -488,6 +489,7 @@ ignored. Modify source, theme, or synchronization scripts instead.
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Engineering workflow discipline](./docs/SCIENTIFIC_WORKFLOWS.md)
 - [Research tasks and the optimization stage](./docs/RESEARCH_TASKS.md)
+- [Process simulation integration (WaterTAP/IDAES/IPOPT)](./docs/SIMULATION.md)
 - [FAQ](./docs/FAQ.md)
 - [Troubleshooting](./docs/TROUBLESHOOTING.md)
 - [Release process](./docs/RELEASE.md)

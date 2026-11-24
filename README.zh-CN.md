@@ -65,7 +65,7 @@ Python 科学代码与知识数据。
 | --- | --- |
 | **闭环优化** | `hydroweaver_optimize_trains` 以有界轮次预算执行“审查 → 修订 → 再生”循环，逐轮输出约束报告、结构化规划修订指令与明确的收敛状态（`feasible` / `stalled` / `budget_exhausted`）。 |
 | **五智能体科学流水线** | 通过 OpenAqua 后端完成查询归一化、混合证据检索、分类体系约束下的规划、规则审查与证据绑定解释。 |
-| **25 个 MCP 工具** | 覆盖分阶段研究任务、运行状态、科学案例完备性评估、闭环优化、推荐报告审计、分类目录、推荐、检索、约束检查、索引、知识暂存、WContBench 评测与作业管理。 |
+| **26 个 MCP 工具** | 覆盖分阶段研究任务、运行状态、科学案例完备性评估、闭环优化、机理流程模拟、推荐报告审计、分类目录、推荐、检索、约束检查、索引、知识暂存、WContBench 评测与作业管理。 |
 | **持久化研究任务** | 保存案例修订、声明范围、结构化待补信息、作业与轮次预算，支持“就绪 → 评估 → 检索 → 推荐 → 优化 → 审计 → 交付”七阶段的跨会话恢复。 |
 | **多种界面** | 完整 TUI、一次性 CLI、轻量 REPL、本地 Web UI 和 Electron 桌面端。 |
 | **持久化工程任务** | 长任务在会话退出后仍可恢复，并记录状态、日志、输出、输入哈希、JSON 载荷哈希与请求指纹。 |
@@ -449,6 +449,7 @@ npm run release:check  # 发布门禁与依赖审计
 - [系统架构](./docs/ARCHITECTURE.md)
 - [工程化工作流纪律](./docs/SCIENTIFIC_WORKFLOWS.md)
 - [研究任务与优化阶段](./docs/RESEARCH_TASKS.md)
+- [流程模拟集成（WaterTAP/IDAES/IPOPT）](./docs/SIMULATION.md)
 - [常见问题](./docs/zh-CN/FAQ.md)
 - [故障排查](./docs/zh-CN/TROUBLESHOOTING.md)
 - [发布流程](./docs/RELEASE.md)

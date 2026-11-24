@@ -46,6 +46,12 @@ import {
   waitForJob,
 } from '../src/hydroweaver/jobs';
 import { openAquaToolAnnotations, HYDROWEAVER_TOOLS } from '../src/hydroweaver/tools';
+import {
+  describeSimulationBackend,
+  parseSimulationSelfCheck,
+  resolveSimulationBackend,
+  simulationSetupGuidance,
+} from '../src/hydroweaver/sim';
 import { readEngineeringRunManifest } from '../src/hydroweaver/provenance';
 import { runResearchCommand } from '../src/hydroweaver/research-tools';
 
@@ -495,8 +501,8 @@ describe('MCP configuration persistence', () => {
 
 describe('HydroWeaver tool catalog', () => {
   it('publishes bounded water-treatment schemas and MCP safety annotations', () => {
-    expect(HYDROWEAVER_TOOLS).toHaveLength(25);
-    expect(new Set(HYDROWEAVER_TOOLS.map((tool) => tool.name)).size).toBe(25);
+    expect(HYDROWEAVER_TOOLS).toHaveLength(26);
+    expect(new Set(HYDROWEAVER_TOOLS.map((tool) => tool.name)).size).toBe(26);
 
     const assess = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_assess_case');
     const audit = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_audit_report');
@@ -1065,6 +1071,64 @@ describe('background jobs', () => {
     expect(cancelled?.status).toBe('cancelled');
     expect(getJob(jobsRoot, started.id)?.status).toBe('cancelled');
   }, 15_000);
+});
+
+describe('simulation backend', () => {
+  it('resolves the interpreter from the environment and the home config', () => {
+    expect(resolveSimulationBackend({ HYDROWEAVER_SIM_PYTHON: '~/watertap/bin/python' })).toEqual({
+      python: path.join(homedir(), 'watertap/bin/python'),
+      source: 'HYDROWEAVER_SIM_PYTHON',
+    });
+    const home = makeTempDir();
+    writeFileSync(
+      path.join(home, 'simulation.json'),
+      JSON.stringify({ python: '/opt/watertap/bin/python' }),
+    );
+    expect(resolveSimulationBackend({}, home)).toEqual({
+      python: '/opt/watertap/bin/python',
+      source: path.join(home, 'simulation.json'),
+    });
+    expect(resolveSimulationBackend({}, makeTempDir())).toBeUndefined();
+    expect(describeSimulationBackend(undefined)).toContain('not configured');
+    expect(simulationSetupGuidance().length).toBeGreaterThan(2);
+  });
+
+  it('parses a self-check report and reports an unavailable backend', () => {
+    const report = parseSimulationSelfCheck(JSON.stringify({
+      available: true,
+      environment: { versions: { watertap: '1.8.0', 'idaes-pse': '2.13.0' }, python: '3.10.22' },
+      solver: { name: 'ipopt', available: true, detail: 'ok' },
+      supported_units: [{ unit: 'Pumping' }, { unit: 'Reverse Osmosis' }],
+    }));
+    expect(report?.available).toBe(true);
+    expect(report?.versions['watertap']).toBe('1.8.0');
+    expect(report?.supportedUnits).toEqual(['Pumping', 'Reverse Osmosis']);
+    expect(report?.solver.available).toBe(true);
+    expect(parseSimulationSelfCheck('not json')).toBeUndefined();
+  });
+
+  it('forwards the simulation interpreter to the MCP server environment', () => {
+    const env = mcpEnvironment('/tmp/home', {
+      HYDROWEAVER_SIM_PYTHON: '/opt/watertap/bin/python',
+      HYDROWEAVER_REPO: '/tmp/OpenAqua',
+      OPENROUTER_API_KEY: 'secret-value',
+    });
+    expect(env['HYDROWEAVER_SIM_PYTHON']).toBe('/opt/watertap/bin/python');
+    expect(env['HYDROWEAVER_REPO']).toBe('/tmp/OpenAqua');
+    expect(env['HYDROWEAVER_HOME']).toBe('/tmp/home');
+    expect(env['OPENROUTER_API_KEY']).toBe('secret-value');
+  });
+
+  it('exposes the simulation tool with a bounded, documented contract', () => {
+    const tool = HYDROWEAVER_TOOLS.find((entry) => entry.name === 'hydroweaver_simulate_train');
+    expect(tool).toBeDefined();
+    expect(Object.keys(tool!.inputSchema)).toEqual(
+      expect.arrayContaining(['queryFile', 'chain', 'waterRecovery', 'feedSalinityGL', 'designFlowM3Day', 'output', 'wait']),
+    );
+    expect(tool!.description).toContain('do NOT predict trace-contaminant rejection');
+    expect(tool!.description).toContain('unconverged');
+    expect(openAquaToolAnnotations('hydroweaver_simulate_train').readOnlyHint).toBe(false);
+  });
 });
 
 function canonicalJsonForTest(value: unknown): string {

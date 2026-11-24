@@ -8,6 +8,12 @@ import { resolveMcpLaunch } from './mcp/register';
 import { defaultWebAssetsDir, packageVersion, resolveUserPath, skillsDir } from './paths';
 import { validateProviderBaseUrl } from './providers';
 import {
+  describeSimulationBackend,
+  probeSimulation,
+  resolveSimulationBackend,
+  simulationSetupGuidance,
+} from './hydroweaver/sim';
+import {
   backendRecommendationReady,
   describeBackend,
   probeBackend,
@@ -207,11 +213,52 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     required: false,
   });
 
+  const simulation = await simulationCheck(homeDir);
+  checks.push(simulation);
+
   return {
     version: packageVersion(),
     homeDir,
     checks,
     healthy: checks.every((c) => c.ok || !c.required),
+  };
+}
+
+async function simulationCheck(homeDir: string): Promise<DoctorCheck> {
+  const backend = resolveSimulationBackend(process.env, homeDir);
+  if (backend === undefined) {
+    return {
+      name: 'simulation_backend',
+      ok: false,
+      detail: `not configured — ${simulationSetupGuidance()[0]}`,
+      required: false,
+    };
+  }
+  const report = await probeSimulation(backend);
+  if (report === undefined) {
+    return {
+      name: 'simulation_backend',
+      ok: false,
+      detail: `${describeSimulationBackend(backend)} — self-check returned no parseable report`,
+      required: false,
+    };
+  }
+  if (!report.available) {
+    return {
+      name: 'simulation_backend',
+      ok: false,
+      detail: `${describeSimulationBackend(backend)} — WaterTAP/IDAES unavailable: ${report.error ?? 'see self-check'}`,
+      required: false,
+    };
+  }
+  const versions = Object.entries(report.versions)
+    .map(([name, version]) => `${name} ${version ?? 'missing'}`)
+    .join(', ');
+  return {
+    name: 'simulation_backend',
+    ok: report.solver.available,
+    detail: `${describeSimulationBackend(backend)} — ${versions}; ipopt ${report.solver.available ? 'available' : 'MISSING'}`,
+    required: false,
   };
 }
 

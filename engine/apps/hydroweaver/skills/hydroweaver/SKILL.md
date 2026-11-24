@@ -167,6 +167,11 @@ of the implemented checks only.
   trains: critique, keep auto-revisions, regenerate through the planner with a
   revision directive on stall, and stop at `feasible`, `stalled`, or
   `budget_exhausted`.
+- `hydroweaver_simulate_train` — build a candidate train as a WaterTAP/IDAES
+  flowsheet and solve it with IPOPT (needs the optional simulation backend:
+  `HYDROWEAVER_SIM_PYTHON`). It reports salinity-driven hydraulics and energy
+  (recovery, pressure, power, membrane area), never trace-contaminant
+  rejection; units without a mechanistic model come back as `unsupported`.
 - `hydroweaver_check_constraints` — apply taxonomy, drinking-water disinfection,
   brine-disposal, and energy rules to supplied candidate trains.
 - `hydroweaver_build_indexes` — replace generated BM25/corpus indexes from the

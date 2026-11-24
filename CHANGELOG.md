@@ -56,6 +56,19 @@ versioning.
   variables, and the paper citation are unchanged; HydroWeaver remains an
   independent product layered on that pipeline.
 
+### Added
+
+- Optional WaterTAP/IDAES/Pyomo/IPOPT process simulation. Configure a Python
+  3.10 environment with WaterTAP (`HYDROWEAVER_SIM_PYTHON`, or
+  `~/.hydroweaver/simulation.json`), then `hydroweaver_simulate_train` builds a
+  candidate train as a flowsheet and solves it with IPOPT: per-unit pressure,
+  power, recovery, permeate salinity and membrane area, flowsheet totals and
+  specific energy, solver status, unit coverage, and the package versions used.
+  `hydroweaver doctor` and `hydroweaver_status` report simulation readiness.
+  The MVP property package models water and sodium chloride, so results describe
+  salinity-driven hydraulics and energy only; units without a mechanistic model
+  are reported as unsupported rather than simulated.
+
 ### Repository maintenance
 
 - Replaced the legacy droplet mark with new HydroWeaver brand artwork (woven

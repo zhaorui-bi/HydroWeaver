@@ -39,6 +39,7 @@ export function mcpEnvironment(
   copyEnvironmentValue(result, env, 'HYDROWEAVER_PYTHON');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_WORKDIR');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_JOBS_DIR');
+  copyEnvironmentValue(result, env, 'HYDROWEAVER_SIM_PYTHON');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_OPENROUTER_MODEL');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_DEFAULT_MODEL');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_PLANNER_MODEL');
