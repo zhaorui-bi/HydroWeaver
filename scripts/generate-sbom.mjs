@@ -73,22 +73,6 @@ const addedPackages = [
     homepage: rootPackage.homepage,
     externalRefs: [purlRef(`pkg:github/zhaorui-bi/HydroWeaver@${rootPackage.version}`)],
   },
-  {
-    SPDXID: 'SPDXRef-Upstream-OpenAqua-0e39908',
-    name: 'OpenAqua',
-    versionInfo: '0e39908',
-    downloadLocation: 'https://github.com/zhaorui-bi/OpenAqua/tree/0e3990817946f1786828fabbfa9ba4bc06af96e8',
-    filesAnalyzed: false,
-    primaryPackagePurpose: 'OTHER',
-    licenseConcluded: 'MIT',
-    licenseDeclared: 'MIT',
-    copyrightText: 'Copyright (c) 2026 ElijahMoulton',
-    supplier: 'Person: ElijahMoulton',
-    homepage: 'https://github.com/zhaorui-bi/OpenAqua',
-    externalRefs: [purlRef('pkg:github/zhaorui-bi/OpenAqua@0e39908')],
-    comment:
-      'External backend compatibility target; the desktop package includes OpenAqua-derived brand assets but not the OpenAqua Python source or dataset.',
-  },
   componentPackage('node_modules/electron', 'LIBRARY', 'MIT'),
   componentPackage(
     'node_modules/@fontsource-variable/cormorant-garamond',
@@ -120,7 +104,7 @@ sbom.creationInfo = {
     'Tool: scripts/generate-sbom.mjs',
   ],
   comment:
-    'Production dependency graph for the vendored engine, OpenAqua-derived brand assets and compatibility metadata, plus Electron and self-hosted font components shipped by the desktop application.',
+    'Production dependency graph for the vendored engine, Electron, and self-hosted font components shipped by the desktop application.',
 };
 
 // pnpm currently assigns workspace dependency edges nondeterministically when

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Stable CLI adapter between HydroWeaver and an OpenAqua source checkout.
+"""Standalone HydroWeaver scientific CLI engine.
 
-The upstream OpenAqua v1 repository exposes Python modules, FastAPI routes, and
-evaluation scripts rather than a single command-line entry point. This adapter
-keeps the harness protocol small and versioned while importing the checkout in
-place. It is shipped with the harness; the OpenAqua checkout and its Python
-dependencies remain external.
+Coordinates knowledge-informed configuration generation, numerical operating-parameter
+optimization, mechanistic and economic process simulation, violation diagnosis,
+structural-vs-parametric routing, shared design history, and AquaDesignGym evaluation.
 """
 
 from __future__ import annotations
@@ -13,61 +11,78 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib.metadata
-import importlib.util
 import json
 import math
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-ADAPTER_VERSION = "0.2.0-beta.1"
+ADAPTER_VERSION = "0.3.0-beta.1"
 CALLER_CWD = Path.cwd()
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from aquadesigngym.baselines import METHOD_REGISTRY  # noqa: E402
+from aquadesigngym.env import AquaDesignGymEnv  # noqa: E402
+from aquadesigngym.evaluate import evaluate_benchmark  # noqa: E402
+from aquadesigngym.tasks import PERTURBATION_PROFILES, list_tasks  # noqa: E402
+from hydroweaver_py.diagnosis import diagnose_simulation  # noqa: E402
+from hydroweaver_py.harness import (  # noqa: E402
+    build_recommendation_report,
+    run_closed_loop_optimization,
+)
+from hydroweaver_py.knowledge import (  # noqa: E402
+    CANONICAL_UNITS,
+    CONTAMINANT_SPECS,
+    TEMPLATE_PRIORS,
+    UNIT_SPECS,
+    build_case_assessment,
+    canonicalize_chain,
+    kb_corpus_chunks,
+    retrieve_evidence,
+    validate_and_normalize_query,
+)
+from hydroweaver_py.simulator import simulate_train  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="HydroWeaver backend adapter")
-    parser.add_argument("--repo", required=True, help="Path to an OpenAqua source checkout")
-    parser.add_argument("--version", action="store_true", help="Print adapter/backend identity")
+    parser = argparse.ArgumentParser(description="HydroWeaver standalone scientific CLI engine")
+    parser.add_argument("--version", action="store_true", help="Print engine version identity")
     subparsers = parser.add_subparsers(dest="command")
 
-    health = subparsers.add_parser("health", help="Inspect the OpenAqua runtime and data")
+    health = subparsers.add_parser("health", help="Inspect HydroWeaver scientific runtime readiness")
     health.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
-    subparsers.add_parser(
-        "identity",
-        help="Report non-secret scientific runtime and model configuration",
-    )
+    subparsers.add_parser("identity", help="Report non-secret scientific engine configuration")
 
-    catalog = subparsers.add_parser("catalog", help="List contaminants and treatment units")
+    catalog = subparsers.add_parser("catalog", help="List contaminants, treatment units, and parameter bounds")
     catalog.add_argument("--kind", choices=("all", "contaminants", "units"), default="all")
     catalog.add_argument("--search", default="")
     catalog.add_argument("--limit", type=int, default=100)
 
-    normalize = subparsers.add_parser("normalize", help="Normalize an OpenAqua query")
+    normalize = subparsers.add_parser("normalize", help="Normalize a HydroWeaver query")
     add_query_arguments(normalize)
     normalize.add_argument("--output")
 
-    assess = subparsers.add_parser(
-        "assess-case",
-        help="Build a structured case state and deterministic information-readiness audit",
-    )
+    assess = subparsers.add_parser("assess-case", help="Build structured case state and readiness audit")
     add_query_arguments(assess)
     assess.add_argument("--output")
 
-    recommend = subparsers.add_parser("recommend", help="Run the five-agent recommendation pipeline")
-    add_query_arguments(recommend)
-    recommend.add_argument("--top-k", type=int, default=3)
-    recommend.add_argument("--output")
-
-    retrieve = subparsers.add_parser("retrieve", help="Normalize a query and retrieve evidence")
+    retrieve = subparsers.add_parser("retrieve", help="Retrieve unit and template priors for a query")
     add_query_arguments(retrieve)
     retrieve.add_argument("--output")
 
-    critic = subparsers.add_parser("check-constraints", help="Apply OpenAqua engineering rules")
+    recommend = subparsers.add_parser("recommend", help="Generate evidence-bound optimized recommendations")
+    add_query_arguments(recommend)
+    recommend.add_argument("--top-k", type=int, default=3)
+    recommend.add_argument("--max-rounds", type=int, default=4)
+    recommend.add_argument("--output")
+
+    critic = subparsers.add_parser("check-constraints", help="Simulate and diagnose candidate treatment trains")
     add_query_arguments(critic)
     critic_source = critic.add_mutually_exclusive_group(required=True)
     critic_source.add_argument("--candidates-json")
@@ -76,46 +91,53 @@ def build_parser() -> argparse.ArgumentParser:
 
     optimize = subparsers.add_parser(
         "optimize",
-        help="Run the closed-loop optimization: generate trains, critique constraints, revise, and re-check until feasible or bounded",
+        help="Run joint configuration & operating-parameter closed-loop optimization with diagnosis routing",
     )
     add_query_arguments(optimize)
     optimize.add_argument("--top-k", type=int, default=3)
-    optimize.add_argument("--max-rounds", type=int, default=3)
+    optimize.add_argument("--max-rounds", type=int, default=4)
+    optimize.add_argument("--max-sim-calls", type=int, default=60)
     optimize_source = optimize.add_mutually_exclusive_group(required=False)
     optimize_source.add_argument("--candidates-json")
     optimize_source.add_argument("--candidates-file")
     optimize.add_argument("--output")
 
-    indexes = subparsers.add_parser("build-indexes", help="Rebuild the local BM25/corpus indexes")
+    sim_cmd = subparsers.add_parser("simulate", help="Simulate a single train configuration and parameters")
+    add_query_arguments(sim_cmd)
+    chain_src = sim_cmd.add_mutually_exclusive_group(required=True)
+    chain_src.add_argument("--chain-json")
+    chain_src.add_argument("--chain-file")
+    params_src = sim_cmd.add_mutually_exclusive_group(required=False)
+    params_src.add_argument("--params-json")
+    params_src.add_argument("--params-file")
+    sim_cmd.add_argument("--output")
+
+    indexes = subparsers.add_parser("build-indexes", help="Rebuild local HydroWeaver knowledge corpus index")
     indexes.add_argument("--output")
 
-    ingest = subparsers.add_parser("ingest", help="Stage a KB record and optionally rebuild indexes")
-    ingest.add_argument(
-        "--kb-type",
-        choices=("kb-unit", "kb-case", "kb_unit", "kb_case"),
-        required=True,
-    )
+    ingest = subparsers.add_parser("ingest", help="Stage a local knowledge record and optionally rebuild index")
+    ingest.add_argument("--kb-type", choices=("kb-unit", "kb-case", "kb_unit", "kb_case"), required=True)
     ingest.add_argument("--data-file", required=True)
     ingest.add_argument("--rebuild", action=argparse.BooleanOptionalAction, default=True)
     ingest.add_argument("--output")
 
-    train_eval = subparsers.add_parser("evaluate-trains", help="Evaluate treatment-train predictions")
-    train_eval.add_argument("--benchmark-dir", required=True)
-    train_eval.add_argument("--predictions", required=True)
-    train_eval.add_argument("--output")
-
-    retrieval_eval = subparsers.add_parser("evaluate-retrieval", help="Evaluate retrieval predictions")
-    retrieval_eval.add_argument("--benchmark-dir", required=True)
-    retrieval_eval.add_argument("--predictions", required=True)
-    retrieval_eval.add_argument("--k", default="1,3,5")
-    retrieval_eval.add_argument("--output")
-
-    audit = subparsers.add_parser(
-        "audit-report",
-        help="Build a structural claim-evidence ledger from an OpenAqua report",
-    )
+    audit = subparsers.add_parser("audit-report", help="Build structural claim-evidence ledger from a report")
     audit.add_argument("--report-file", required=True)
     audit.add_argument("--output")
+
+    gym_tasks = subparsers.add_parser("gym-tasks", help="List AquaDesignGym tasks, actions, and methods")
+    gym_tasks.add_argument("--output")
+
+    gym_eval = subparsers.add_parser(
+        "gym-eval",
+        help="Run AquaDesignGym matched-budget benchmark, ablations, and varying-influent robustness evaluation",
+    )
+    gym_eval.add_argument("--methods", default="")
+    gym_eval.add_argument("--tasks", default="")
+    gym_eval.add_argument("--perturbations", default="nominal,mild_shift,severe_shift")
+    gym_eval.add_argument("--max-sim-calls", type=int, default=60)
+    gym_eval.add_argument("--seed", type=int, default=42)
+    gym_eval.add_argument("--output")
 
     return parser
 
@@ -126,17 +148,6 @@ def add_query_arguments(parser: argparse.ArgumentParser) -> None:
     source.add_argument("--query-file")
 
 
-def resolve_repo(raw: str) -> Path:
-    candidate = resolve_external_path(raw)
-    if (candidate / "water_treatment_agent" / "requirements.txt").is_file():
-        return candidate
-    if candidate.name == "water_treatment_agent" and (candidate / "requirements.txt").is_file():
-        return candidate.parent
-    raise FileNotFoundError(
-        f"Not an OpenAqua checkout: {candidate} (expected water_treatment_agent/requirements.txt)"
-    )
-
-
 def resolve_external_path(raw: str) -> Path:
     path = Path(raw).expanduser()
     if not path.is_absolute():
@@ -144,25 +155,31 @@ def resolve_external_path(raw: str) -> Path:
     return path.resolve()
 
 
-def bootstrap(repo: Path) -> Path:
-    model_overrides = {
-        "HYDROWEAVER_DEFAULT_MODEL": "DEFAULT_MODEL",
-        "HYDROWEAVER_PLANNER_MODEL": "PLANNER_MODEL",
-        "HYDROWEAVER_EXPLANATION_MODEL": "EXPLANATION_MODEL",
-    }
-    common_model = os.environ.get("HYDROWEAVER_OPENROUTER_MODEL", "").strip()
-    if common_model:
-        for target in model_overrides.values():
-            os.environ.setdefault(target, common_model)
-    for source, target in model_overrides.items():
-        value = os.environ.get(source, "").strip()
-        if value:
-            os.environ[target] = value
+def _home_dir() -> Path:
+    raw = os.environ.get("HYDROWEAVER_HOME", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return (Path.home() / ".hydroweaver").resolve()
 
-    agent_root = repo / "water_treatment_agent"
-    sys.path.insert(0, str(agent_root))
-    os.chdir(agent_root)
-    return agent_root
+
+def _kb_dirs() -> tuple[Path, Path]:
+    home = _home_dir()
+    return home / "ingest", home / "indexes"
+
+
+def _load_staged_records() -> list[dict[str, Any]]:
+    ingest_dir, _ = _kb_dirs()
+    if not ingest_dir.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in sorted(ingest_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                records.append(data)
+        except Exception:
+            continue
+    return records
 
 
 def load_json_source(json_text: str | None, file_name: str | None, label: str) -> Any:
@@ -173,12 +190,6 @@ def load_json_source(json_text: str | None, file_name: str | None, label: str) -
     path = resolve_external_path(file_name)
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def model_json(model: Any) -> Any:
-    if hasattr(model, "model_dump"):
-        return model.model_dump(mode="json")
-    return model
 
 
 def json_safe_value(value: Any) -> Any:
@@ -217,21 +228,6 @@ def emit(payload: Any, output: str | None = None) -> None:
     print(json.dumps(json_safe_value(payload), ensure_ascii=False, indent=2, sort_keys=False, allow_nan=False))
 
 
-def repository_revision(repo: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), "describe", "--tags", "--always", "--dirty"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        value = result.stdout.strip()
-        return value or "unknown"
-    except Exception:
-        return "unknown"
-
-
 def dependency_version(name: str) -> str | None:
     try:
         return importlib.metadata.version(name)
@@ -239,121 +235,75 @@ def dependency_version(name: str) -> str | None:
         return None
 
 
-def command_health(repo: Path) -> dict[str, Any]:
-    from app.core.config import get_settings
-
-    settings = get_settings()
-    index_dir = Path(settings.index_dir)
-    corpus = index_dir / "corpus.jsonl"
-    chunk_count = 0
-    if corpus.is_file():
-        with corpus.open("r", encoding="utf-8") as handle:
-            chunk_count = sum(1 for _ in handle)
-
-    taxonomy_path = Path(settings.taxonomy_path)
-    unit_kb_dir = Path(settings.unit_kb_dir)
-    case_kb_json = Path(settings.case_kb_json)
-    dependencies = {
-        name: dependency_version(name)
-        for name in ("pydantic", "pydantic-settings", "openai", "rank-bm25")
-    }
-    indexes_available = corpus.is_file() and (index_dir / "bm25_index.pkl").is_file()
-    data_ready = (
-        taxonomy_path.is_file()
-        and unit_kb_dir.is_dir()
-        and indexes_available
-        and chunk_count > 0
-    )
-    return {
-        "ok": all(version is not None for version in dependencies.values()),
-        "ready_for_recommendation": data_ready,
-        "ready_for_evaluation": True,
-        "adapter_version": ADAPTER_VERSION,
-        "backend_revision": repository_revision(repo),
-        "repo": str(repo),
-        "python": sys.version.split()[0],
-        "dependencies": dependencies,
-        "llm": {
-            "configured": bool(settings.openrouter_api_key),
-            "default_model": settings.default_model,
-            "planner_model": settings.planner_model,
-            "explanation_model": settings.explanation_model,
-        },
-        "data": {
-            "data_dir": str(settings.data_dir),
-            "taxonomy_path": str(taxonomy_path),
-            "taxonomy_available": taxonomy_path.is_file(),
-            "unit_kb_dir": str(unit_kb_dir),
-            "unit_kb_available": unit_kb_dir.is_dir(),
-            "case_kb_json": str(case_kb_json),
-            "case_kb_available": case_kb_json.is_file(),
-            "index_dir": str(index_dir),
-            "indexes_available": indexes_available,
-            "chunk_count": chunk_count,
-        },
-    }
-
-
-def command_identity(repo: Path) -> dict[str, Any]:
-    from app.core.config import get_settings
-
-    settings = get_settings()
-    return {
-        "adapter_version": ADAPTER_VERSION,
-        "backend_revision": repository_revision(repo),
-        "python": sys.version.split()[0],
-        "models": {
-            "openrouter_configured": bool(getattr(settings, "openrouter_api_key", "")),
-            "default_model": getattr(settings, "default_model", None),
-            "planner_model": getattr(settings, "planner_model", None),
-            "explanation_model": getattr(settings, "explanation_model", None),
-            "llm_temperature": getattr(settings, "llm_temperature", None),
-            "llm_max_tokens": getattr(settings, "llm_max_tokens", None),
-        },
-        "retrieval": {
-            "top_k_retrieval": getattr(settings, "top_k_retrieval", None),
-            "top_k_rerank": getattr(settings, "top_k_rerank", None),
-            "bm25_weight": getattr(settings, "bm25_weight", None),
-            "embedding_weight": getattr(settings, "embedding_weight", None),
-            "embedding_model": getattr(settings, "embedding_model", None),
-        },
-        "planning": {
-            "top_k_recommendations": getattr(settings, "top_k_recommendations", None),
-            "max_planning_candidates": getattr(settings, "max_planning_candidates", None),
-            "max_critic_iterations": getattr(settings, "max_critic_iterations", None),
-        },
-    }
-
-
-def load_user_query(args: argparse.Namespace) -> Any:
-    from app.core.schemas import UserQuery
-
+def load_user_query(args: argparse.Namespace) -> dict[str, Any]:
     value = load_json_source(args.query_json, args.query_file, "query")
     if not isinstance(value, dict):
         raise ValueError("query must be a JSON object")
-    for section in ("water_quality", "treatment_targets"):
-        measurements = value.get(section)
-        if not isinstance(measurements, dict):
-            continue
-        for field, measurement in measurements.items():
-            if field in _MEASUREMENT_UNITS and isinstance(measurement, bool):
-                raise ValueError(f"{section}.{field} must be a numeric measurement, not a boolean")
-        extra = measurements.get("extra")
-        if isinstance(extra, dict):
-            for field, measurement in extra.items():
-                if field in _MEASUREMENT_UNITS and isinstance(measurement, bool):
-                    raise ValueError(f"{section}.extra.{field} must be a numeric measurement, not a boolean")
-    constraints = value.get("constraints")
-    if isinstance(constraints, dict) and isinstance(constraints.get("extra"), dict):
-        if isinstance(constraints["extra"].get("design_flow_m3_day"), bool):
-            raise ValueError("constraints.extra.design_flow_m3_day must be a numeric flow, not a boolean")
-    return UserQuery(**value)
+    return value
+
+
+def command_health() -> dict[str, Any]:
+    ingest_dir, index_dir = _kb_dirs()
+    corpus_file = index_dir / "corpus.jsonl"
+    staged = _load_staged_records()
+    builtin_chunks = len(kb_corpus_chunks())
+    chunk_count = builtin_chunks + len(staged)
+    if corpus_file.is_file():
+        with corpus_file.open("r", encoding="utf-8") as handle:
+            chunk_count = sum(1 for _ in handle)
+    return {
+        "ok": True,
+        "ready_for_recommendation": True,
+        "ready_for_optimization": True,
+        "ready_for_evaluation": True,
+        "adapter_version": ADAPTER_VERSION,
+        "engine_mode": "standalone-hydroweaver",
+        "python": sys.version.split()[0],
+        "optional_packages": {
+            "numpy": dependency_version("numpy"),
+            "scipy": dependency_version("scipy"),
+        },
+        "knowledge_base": {
+            "units": len(UNIT_SPECS),
+            "contaminants": len(CONTAMINANT_SPECS),
+            "templates": len(TEMPLATE_PRIORS),
+            "staged_records": len(staged),
+            "chunk_count": chunk_count,
+            "ingest_dir": str(ingest_dir),
+            "index_dir": str(index_dir),
+        },
+        "aquadesigngym": {
+            "tasks": len(list_tasks()),
+            "methods": len(METHOD_REGISTRY),
+            "perturbations": list(PERTURBATION_PROFILES.keys()),
+        },
+    }
+
+
+def command_identity() -> dict[str, Any]:
+    return {
+        "adapter_version": ADAPTER_VERSION,
+        "engine_mode": "standalone-hydroweaver",
+        "python": sys.version.split()[0],
+        "knowledge": {
+            "units": len(UNIT_SPECS),
+            "contaminants": len(CONTAMINANT_SPECS),
+            "templates": len(TEMPLATE_PRIORS),
+        },
+        "optimization": {
+            "joint_config_and_params": True,
+            "parameter_optimizer": "bounded-hooke-jeeves-pattern-search",
+            "diagnosis_router": "simulation-feedback-structural-vs-parametric",
+            "shared_design_history": True,
+        },
+        "aquadesigngym": {
+            "tasks": len(list_tasks()),
+            "methods": list(METHOD_REGISTRY.keys()),
+        },
+    }
 
 
 def command_catalog(args: argparse.Namespace) -> dict[str, Any]:
-    from app.core.taxonomy import get_taxonomy
-
-    taxonomy = get_taxonomy()
     search = args.search.strip().lower()
     limit = max(1, min(args.limit, 1000))
 
@@ -363,887 +313,213 @@ def command_catalog(args: argparse.Namespace) -> dict[str, Any]:
 
     payload: dict[str, Any] = {"search": args.search, "limit": limit}
     if args.kind in ("all", "contaminants"):
-        contaminants = filtered(sorted(taxonomy.all_contaminant_ids(), key=str.lower))
+        contaminants = filtered(sorted(CONTAMINANT_SPECS.keys()))
         payload["contaminants"] = contaminants
         payload["contaminants_returned"] = len(contaminants)
     if args.kind in ("all", "units"):
-        units = filtered(taxonomy.all_treatment_units())
+        units = filtered(list(CANONICAL_UNITS))
         payload["treatment_units"] = units
         payload["treatment_units_returned"] = len(units)
+        payload["unit_details"] = [
+            {
+                "unit": u,
+                "stage": UNIT_SPECS[u].stage,
+                "mechanisms": list(UNIT_SPECS[u].mechanisms),
+                "target_contaminants": list(UNIT_SPECS[u].target_contaminants),
+                "generates_brine": UNIT_SPECS[u].generates_brine,
+                "requires_chemical_dosing": UNIT_SPECS[u].requires_chemical_dosing,
+                "parameters": [
+                    {
+                        "name": p.name,
+                        "unit": p.unit,
+                        "lower": p.lower,
+                        "upper": p.upper,
+                        "default": p.default,
+                    }
+                    for p in UNIT_SPECS[u].params
+                ],
+            }
+            for u in units
+        ]
     return payload
 
 
 def command_normalize(args: argparse.Namespace) -> dict[str, Any]:
-    from app.agents.parser_agent import TaskParserAgent
-
     query = load_user_query(args)
-    normalized = TaskParserAgent().run(query)
-    data, preservation = retain_declared_context(normalized, query)
-    return {"normalized_query": data, "context_preservation": preservation}
-
-
-_MEASUREMENT_UNITS = {
-    "pH": None,
-    "turbidity_NTU": "NTU",
-    "arsenic_ug_L": "µg/L",
-    "nitrate_mg_L": "mg/L",
-    "fluoride_mg_L": "mg/L",
-    "toc_mg_L": "mg/L",
-    "iron_mg_L": "mg/L",
-    "hardness_mg_L": "mg/L",
-    "e_coli_CFU_100mL": "CFU/100 mL",
-    "lead_ug_L": "µg/L",
-}
-_TARGET_FIELDS = {
-    "arsenic": "arsenic_ug_L",
-    "nitrate": "nitrate_mg_L",
-    "fluoride": "fluoride_mg_L",
-    "turbidity": "turbidity_NTU",
-    "toc": "toc_mg_L",
-    "e_coli": "e_coli",
-    "lead": "extra.lead_ug_L",
-}
-_PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2}
-
-
-def _as_mapping(value: Any) -> dict[str, Any]:
-    value = model_json(value)
-    return value if isinstance(value, dict) else {}
-
-
-def retain_declared_context(normalized: Any, query: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    data = dict(_as_mapping(normalized))
-    declared = _as_mapping(query)
-    retained_fields = []
-    for section in ("water_quality", "treatment_targets", "constraints"):
-        explicit_extra = _as_mapping(_as_mapping(declared.get(section)).get("extra"))
-        if not explicit_extra:
-            continue
-        values = dict(_as_mapping(data.get(section)))
-        values["extra"] = {**_as_mapping(values.get("extra")), **explicit_extra}
-        data[section] = values
-        retained_fields.extend(f"{section}.extra.{field}" for field in sorted(explicit_extra))
-    return data, {
-        "retained_fields": retained_fields,
-        "scope": (
-            "Explicit extra fields are retained in the Harness case state and output after upstream parsing. "
-            "Retention does not establish that the upstream planner, retriever, or critic used or enforced these fields."
-        ),
-    }
-
-
-def _has_value(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, (list, dict)):
-        return bool(value)
-    return True
-
-
-def _measurement_records(values: dict[str, Any]) -> list[dict[str, Any]]:
-    records = []
-    extra = _as_mapping(values.get("extra"))
-    for field, value in values.items():
-        if field == "extra" or not _has_value(value):
-            continue
-        record = {
-            "field": field,
-            "value": value,
-            "unit": _MEASUREMENT_UNITS.get(field),
-        }
-        if field in {"nitrate_mg_L", "hardness_mg_L"}:
-            record["basis"] = extra.get(field.removesuffix("_mg_L") + "_basis")
-        records.append(record)
-    records.extend(
-        {
-            "field": f"extra.{field}",
-            "value": value,
-            "unit": _MEASUREMENT_UNITS.get(field),
-        }
-        for field, value in sorted(extra.items())
-        if _has_value(value)
-    )
-    return records
-
-
-def _is_finite_number(value: Any) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False
-
-
-def _nitrate_basis(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    token = re.sub(r"[\s_-]+", "", value.lower().replace("₃", "3"))
-    if token in {"asn", "n", "no3n", "nitraten", "nitrateasn"}:
-        return "as_N"
-    if token in {"asno3", "no3", "nitrateasno3"}:
-        return "as_NO3"
-    return None
-
-
-def _add_information_action(
-    actions: list[dict[str, Any]],
-    seen: set[str],
-    *,
-    code: str,
-    field: str,
-    priority: str,
-    action_type: str,
-    rationale: str,
-    decision_impact: str,
-) -> None:
-    if field in seen:
-        return
-    seen.add(field)
-    actions.append(
-        {
-            "code": code,
-            "field": field,
-            "priority": priority,
-            "action_type": action_type,
-            "rationale": rationale,
-            "decision_impact": decision_impact,
-            "basis": "deterministic_screening_rule",
-        }
-    )
-
-
-def build_case_assessment(normalized: Any) -> dict[str, Any]:
-    data = _as_mapping(normalized)
-    water_quality = _as_mapping(data.get("water_quality"))
-    targets = _as_mapping(data.get("treatment_targets"))
-    constraints = _as_mapping(data.get("constraints"))
-    contaminants = [
-        str(value).strip()
-        for value in data.get("contaminants", [])
-        if isinstance(value, str) and value.strip()
-    ]
-    contaminant_set = {value.lower() for value in contaminants}
-    source_water = str(data.get("source_water") or "unknown").strip() or "unknown"
-    actions: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    water_extra = _as_mapping(water_quality.get("extra"))
-    target_extra = _as_mapping(targets.get("extra"))
-    constraint_extra = _as_mapping(constraints.get("extra"))
-
-    for section, values in (("water_quality", water_quality), ("treatment_targets", targets)):
-        measurements = [(field, value) for field, value in values.items() if field != "extra"]
-        measurements.extend(
-            (f"extra.{field}", value)
-            for field, value in _as_mapping(values.get("extra")).items()
-        )
-        for field, value in measurements:
-            name = field.removeprefix("extra.")
-            if name not in _MEASUREMENT_UNITS or value is None:
-                continue
-            if not _is_finite_number(value) or (name != "pH" and value < 0):
-                _add_information_action(
-                    actions,
-                    seen,
-                    code="CASE-VALUE-001",
-                    field=f"{section}.{field}",
-                    priority="critical",
-                    action_type="verify_measurement",
-                    rationale="A quantitative value is non-numeric, non-finite, or negative for a nonnegative measurement.",
-                    decision_impact="Correct the value and its units before using it to screen treatment options.",
-                )
-            elif name == "pH" and not 0 <= value <= 14:
-                _add_information_action(
-                    actions,
-                    seen,
-                    code="CASE-PH-001",
-                    field=f"{section}.{field}",
-                    priority="high",
-                    action_type="verify_measurement",
-                    rationale="The reported pH lies outside the conventional 0–14 range for ordinary aqueous systems.",
-                    decision_impact="Verify the sample matrix and measurement method; this is a review flag, not an absolute physical limit.",
-                )
-
-    if "nitrate" in contaminant_set or any(
-        _has_value(values.get("nitrate_mg_L")) for values in (water_quality, targets)
-    ):
-        bases = {}
-        for section, extra in (("water_quality", water_extra), ("treatment_targets", target_extra)):
-            bases[section] = _nitrate_basis(extra.get("nitrate_basis"))
-            if bases[section] is None:
-                _add_information_action(
-                    actions,
-                    seen,
-                    code="CASE-NO3-001",
-                    field=f"{section}.extra.nitrate_basis",
-                    priority="high",
-                    action_type="clarify_units",
-                    rationale="The nitrate reporting basis is missing or unrecognized; specify as_N or as_NO3.",
-                    decision_impact="Influent and target mg/L values cannot be compared until their mass bases are explicit; no automatic conversion is applied.",
-                )
-        if all(bases.values()) and bases["water_quality"] != bases["treatment_targets"]:
-            _add_information_action(
-                actions,
-                seen,
-                code="CASE-NO3-002",
-                field="treatment_targets.extra.nitrate_basis",
-                priority="high",
-                action_type="clarify_units",
-                rationale="Influent and target nitrate concentrations use different mass bases.",
-                decision_impact="Provide values on a documented common basis before comparing treatment requirements; no automatic conversion is applied.",
-            )
-
-    if _has_value(water_quality.get("hardness_mg_L")) and (
-        not isinstance(water_extra.get("hardness_basis"), str)
-        or water_extra["hardness_basis"].strip().lower() in {"", "unknown", "unspecified"}
-    ):
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-HARDNESS-001",
-            field="water_quality.extra.hardness_basis",
-            priority="medium",
-            action_type="clarify_units",
-            rationale="Hardness is reported in mg/L without an explicit reporting basis.",
-            decision_impact="State the basis, such as as CaCO3, before comparing evidence or calculating treatment demand.",
-        )
-
-    design_flow = constraint_extra.get("design_flow_m3_day")
-    if design_flow is None:
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-FLOW-001",
-            field="constraints.extra.design_flow_m3_day",
-            priority="medium",
-            action_type="clarify_design_basis",
-            rationale="A design flow in m³/day has not been supplied.",
-            decision_impact="Only technology screening is supported; process sizing and hydraulic loading require an explicit design flow.",
-        )
-    elif not _is_finite_number(design_flow) or design_flow <= 0:
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-FLOW-002",
-            field="constraints.extra.design_flow_m3_day",
-            priority="critical",
-            action_type="verify_measurement",
-            rationale="The design flow must be a finite positive number in m³/day.",
-            decision_impact="Correct the declared flow before using it as a design basis.",
-        )
-
-    if source_water.lower() == "unknown":
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-001",
-            field="source_water",
-            priority="critical",
-            action_type="clarify_context",
-            rationale="The source-water type is not established.",
-            decision_impact="Source-water context changes pretreatment needs and evidence transferability.",
-        )
-    if not contaminants:
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-002",
-            field="contaminants",
-            priority="critical",
-            action_type="identify_contaminants",
-            rationale="No contaminant was mapped to the controlled taxonomy.",
-            decision_impact="A treatment train cannot be screened without a defined treatment objective.",
-        )
-    if not any(_is_finite_number(record["value"]) for record in _measurement_records(water_quality)):
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-003",
-            field="water_quality",
-            priority="critical",
-            action_type="provide_measurements",
-            rationale="No measured source-water values were supplied.",
-            decision_impact="Concentrations and matrix conditions are needed to assess whether a technology is applicable.",
-        )
-
-    concentration_fields = {
-        "arsenic": "arsenic_ug_L",
-        "nitrate": "nitrate_mg_L",
-        "fluoride": "fluoride_mg_L",
-        "turbidity": "turbidity_NTU",
-        "toc": "toc_mg_L",
-        "e_coli": "e_coli_CFU_100mL",
-        "lead": "lead_ug_L",
-    }
-    for contaminant in contaminants:
-        key = contaminant.lower()
-        concentration_field = concentration_fields.get(key)
-        if concentration_field is not None and not _has_value(water_quality.get(concentration_field)):
-            _add_information_action(
-                actions,
-                seen,
-                code="CASE-004",
-                field=f"water_quality.{concentration_field}",
-                priority="high",
-                action_type="measure_influent",
-                rationale=f"{contaminant} is listed, but its influent value is missing.",
-                decision_impact="Influent loading affects treatment intensity and whether the stated target is technically meaningful.",
-            )
-        target_field = _TARGET_FIELDS.get(key)
-        target_value = (
-            target_extra.get(target_field.removeprefix("extra."))
-            if target_field is not None and target_field.startswith("extra.")
-            else targets.get(target_field)
-        )
-        if target_field is not None and not _has_value(target_value):
-            _add_information_action(
-                actions,
-                seen,
-                code="CASE-005",
-                field=f"treatment_targets.{target_field}",
-                priority="high",
-                action_type="clarify_target",
-                rationale=f"No explicit effluent target was supplied for {contaminant}.",
-                decision_impact="Candidate trains cannot be compared against a declared treatment endpoint.",
-            )
-
-    target_values = [value for field, value in targets.items() if field != "extra"]
-    target_extra = targets.get("extra")
-    if not any(_has_value(value) for value in target_values) and not _has_value(target_extra):
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-006",
-            field="treatment_targets",
-            priority="high",
-            action_type="clarify_target",
-            rationale="The case has no measurable treatment target or named compliance standard.",
-            decision_impact="A ranked recommendation without an endpoint is only a technology shortlist.",
-        )
-
-    if constraints.get("use_for_drinking") is None:
-        _add_information_action(
-            actions,
-            seen,
-            code="CASE-007",
-            field="constraints.use_for_drinking",
-            priority="high",
-            action_type="declare_constraint",
-            rationale="The intended use of the treated water is unknown.",
-            decision_impact="Drinking-water use changes disinfection and review requirements.",
-        )
-    for field, code, impact in (
-        (
-            "brine_disposal",
-            "CASE-008",
-            "Brine-disposal availability can exclude concentration-based membrane trains.",
-        ),
-        (
-            "energy",
-            "CASE-009",
-            "Energy availability changes the acceptability of energy-intensive unit operations.",
-        ),
-        (
-            "operator_skill",
-            "CASE-010",
-            "Operator capacity affects whether complex treatment trains are practically supportable.",
-        ),
-        (
-            "chemical_dosing_allowed",
-            "CASE-011",
-            "Chemical-use restrictions can exclude otherwise plausible oxidation, coagulation, or disinfection steps.",
-        ),
-    ):
-        if constraints.get(field) is None:
-            _add_information_action(
-                actions,
-                seen,
-                code=code,
-                field=f"constraints.{field}",
-                priority="medium",
-                action_type="declare_constraint",
-                rationale=f"The {field.replace('_', ' ')} constraint is not declared.",
-                decision_impact=impact,
-            )
-
-    if "arsenic" in contaminant_set:
-        arsenic_speciation = water_extra.get("arsenic_speciation")
-        if not isinstance(arsenic_speciation, str) or arsenic_speciation.strip().lower() in {
-            "", "unknown", "unspecified", "not measured",
-        }:
-            _add_information_action(
-                actions,
-                seen,
-                code="CASE-AS-003",
-                field="water_quality.extra.arsenic_speciation",
-                priority="medium",
-                action_type="measure_speciation",
-                rationale="The arsenic oxidation-state distribution is not established.",
-                decision_impact="Clarify As(III)/As(V) before transferring evidence or deciding whether pre-oxidation is needed; total arsenic alone does not establish speciation.",
-            )
-        if not _has_value(water_quality.get("pH")):
-            _add_information_action(
-                actions,
-                seen,
-                code="CASE-AS-001",
-                field="water_quality.pH",
-                priority="high",
-                action_type="measure_matrix",
-                rationale="pH is missing for an arsenic-treatment case.",
-                decision_impact="pH affects arsenic speciation and the applicability of adsorption and coagulation evidence.",
-            )
-        if not _has_value(water_quality.get("iron_mg_L")):
-            _add_information_action(
-                actions,
-                seen,
-                code="CASE-AS-002",
-                field="water_quality.iron_mg_L",
-                priority="medium",
-                action_type="measure_matrix",
-                rationale="Iron concentration is missing for an arsenic-treatment case.",
-                decision_impact="Background iron can affect oxidation, co-precipitation, and adsorptive removal behavior.",
-            )
-    if source_water.lower() in {"surface water", "surface_water"}:
-        for field, code, impact in (
-            (
-                "turbidity_NTU",
-                "CASE-SW-001",
-                "Turbidity affects pretreatment and particle-removal requirements.",
-            ),
-            (
-                "toc_mg_L",
-                "CASE-SW-002",
-                "Organic carbon affects oxidant demand, adsorption competition, and by-product risk.",
-            ),
-        ):
-            if not _has_value(water_quality.get(field)):
-                _add_information_action(
-                    actions,
-                    seen,
-                    code=code,
-                    field=f"water_quality.{field}",
-                    priority="medium",
-                    action_type="measure_matrix",
-                    rationale=f"{field} is missing for a surface-water case.",
-                    decision_impact=impact,
-                )
-
-    actions.sort(key=lambda item: (_PRIORITY_ORDER[item["priority"]], item["field"]))
-    critical_count = sum(action["priority"] == "critical" for action in actions)
-    high_count = sum(action["priority"] == "high" for action in actions)
-    status = (
-        "blocked"
-        if critical_count
-        else "needs_information"
-        if high_count
-        else "ready_for_screening"
-    )
-    missing_fields = [
-        str(value) for value in data.get("missing_fields", []) if isinstance(value, str)
-    ]
-    return {
-        "case_state": {
-            "schema_version": 1,
-            "query_id": str(data.get("query_id") or "unknown"),
-            "source_water": source_water,
-            "contaminants": contaminants,
-            "measurements": _measurement_records(water_quality),
-            "treatment_targets": _measurement_records(targets),
-            "constraints": {
-                key: value
-                for key, value in constraints.items()
-                if value is not None
-            },
-            "design_basis": {
-                "design_flow_m3_day": design_flow,
-                "sizing_ready": False,
-                "interpretation": "This audit supports technology screening, not process sizing or a final engineering design.",
-            },
-            "context": data.get("context"),
-            "missing_fields": missing_fields,
-            "assumptions": [
-                str(value) for value in data.get("assumptions", []) if isinstance(value, str)
-            ],
-            "normalization_notes": [
-                str(value)
-                for value in data.get("normalization_notes", [])
-                if isinstance(value, str)
-            ],
-        },
-        "decision_readiness": {
-            "status": status,
-            "critical_blockers": [
-                action for action in actions if action["priority"] == "critical"
-            ],
-            "information_actions": actions,
-            "summary": {
-                "critical": critical_count,
-                "high": high_count,
-                "medium": sum(action["priority"] == "medium" for action in actions),
-            },
-            "interpretation": (
-                "This is a deterministic screening audit, not a calibrated probability of "
-                "treatment success, compliance, safety, or field performance."
-            ),
-        },
-    }
+    normalized, preservation = validate_and_normalize_query(query)
+    return {"normalized_query": normalized, "context_preservation": preservation}
 
 
 def command_assess_case(args: argparse.Namespace) -> dict[str, Any]:
-    from app.agents.parser_agent import TaskParserAgent
-
     query = load_user_query(args)
-    normalized = TaskParserAgent().run(query)
-    data, preservation = retain_declared_context(normalized, query)
+    normalized, preservation = validate_and_normalize_query(query)
     return {
-        "normalized_query": data,
+        "normalized_query": normalized,
         "context_preservation": preservation,
-        **build_case_assessment(data),
+        **build_case_assessment(normalized),
+    }
+
+
+def command_retrieve(args: argparse.Namespace) -> dict[str, Any]:
+    query = load_user_query(args)
+    normalized, preservation = validate_and_normalize_query(query)
+    retrieval = retrieve_evidence(normalized, extra_records=_load_staged_records())
+    return {
+        "normalized_query": normalized,
+        "context_preservation": preservation,
+        "retrieval": retrieval,
     }
 
 
 def command_recommend(args: argparse.Namespace) -> dict[str, Any]:
-    from app.workflows.pipeline import WaterTreatmentPipeline
-
     if not 1 <= args.top_k <= 10:
         raise ValueError("top-k must be between 1 and 10")
     query = load_user_query(args)
-    report = model_json(WaterTreatmentPipeline().run(query, top_k=args.top_k))
-    if isinstance(report, dict) and isinstance(report.get("normalized_query"), dict):
-        data, preservation = retain_declared_context(report["normalized_query"], query)
-        report["normalized_query"] = data
-        report["context_preservation"] = preservation
-        report["case_assessment"] = build_case_assessment(data)
-    return report
+    return build_recommendation_report(query, top_k=args.top_k, max_rounds=max(1, min(args.max_rounds, 8)))
 
 
-def command_retrieve(args: argparse.Namespace) -> dict[str, Any]:
-    from app.agents.parser_agent import TaskParserAgent
-    from app.agents.retrieval_agent import RetrievalAgent
-
-    query = load_user_query(args)
-    normalized = TaskParserAgent().run(query)
-    retrieval = RetrievalAgent().run(normalized)
-    data, preservation = retain_declared_context(normalized, query)
-    return {
-        "normalized_query": data,
-        "context_preservation": preservation,
-        "retrieval": model_json(retrieval),
-    }
-
-
-def candidate_bundle(args: argparse.Namespace, normalized: Any) -> Any:
-    from app.core.schemas import CandidatesBundle
-
-    raw = load_json_source(args.candidates_json, args.candidates_file, "candidates")
-    return CandidatesBundle(query_id=normalized.query_id, candidates=candidate_chains(raw))
-
-
-def candidate_chains(raw: Any) -> list[Any]:
-    from app.core.schemas import CandidateChain
-
+def _parse_candidates_raw(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, dict) and isinstance(raw.get("candidates"), list):
         raw = raw["candidates"]
     if not isinstance(raw, list) or not raw:
         raise ValueError("candidates must be a non-empty JSON array")
-
-    candidates = []
-    for index, item in enumerate(raw, start=1):
+    parsed: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw, start=1):
         if isinstance(item, list):
             item = {"chain": item}
         if not isinstance(item, dict):
-            raise ValueError(f"candidate {index} must be an object or a list of unit names")
+            raise ValueError(f"candidate {idx} must be an object or a list of unit names")
         chain = item.get("chain") or item.get("process_chain")
-        if not isinstance(chain, list) or not chain or not all(isinstance(unit, str) for unit in chain):
-            raise ValueError(f"candidate {index} requires a non-empty string array named chain")
-        normalized_units = [unit.strip() for unit in chain if unit.strip()]
-        lower_units = {unit.replace("_", " ").lower() for unit in normalized_units}
-        candidates.append(
-            CandidateChain(
-                chain_id=str(item.get("chain_id") or f"candidate_{index}"),
-                chain=normalized_units,
-                key_units=item.get("key_units") or normalized_units[:3],
-                rationale=str(item.get("rationale") or "User-supplied chain for rule checking"),
-                energy_intensity=item.get("energy_intensity"),
-                generates_brine=bool(
-                    item.get("generates_brine", "membrane separation" in lower_units)
-                ),
-                requires_disinfection=bool(
-                    item.get(
-                        "requires_disinfection",
-                        any(
-                            token in lower_units
-                            for token in (
-                                "chlorine",
-                                "chloramine",
-                                "chlorine dioxide",
-                                "ozone",
-                                "ultraviolet irradiation",
-                            )
-                        ),
-                    )
-                ),
-            )
+        if not isinstance(chain, list) or not chain or not all(isinstance(u, str) for u in chain):
+            raise ValueError(f"candidate {idx} requires a non-empty string array named chain")
+        parsed.append(
+            {
+                "chain_id": str(item.get("chain_id") or f"candidate_{idx}"),
+                "chain": [u.strip() for u in chain if u.strip()],
+                "parameters": item.get("parameters"),
+                "rationale": str(item.get("rationale") or "Caller-supplied candidate train"),
+            }
         )
-    return candidates
-
-
-def bundle_candidates(bundle: Any) -> list[dict[str, Any]]:
-    data = model_json(bundle)
-    candidates = data.get("candidates") if isinstance(data, dict) else None
-    if not isinstance(candidates, list):
-        return []
-    return [candidate for candidate in candidates if isinstance(candidate, dict)]
-
-
-def chain_signature(bundle: Any) -> list[list[str]]:
-    return sorted(
-        [str(unit) for unit in candidate.get("chain", [])]
-        for candidate in bundle_candidates(bundle)
-    )
-
-
-def constraint_entries(report: Any) -> list[dict[str, Any]]:
-    if not isinstance(report, dict):
-        return []
-    for key in ("chain_reports", "chains", "reports", "results", "constraint_reports"):
-        value = report.get(key)
-        if isinstance(value, list):
-            return [entry for entry in value if isinstance(entry, dict)]
-    if "overall_status" in report:
-        return [report]
-    return []
-
-
-def entry_status(entry: dict[str, Any]) -> str:
-    for key in ("overall_status", "status", "constraint_status"):
-        value = entry.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip().upper()
-    return "UNKNOWN"
-
-
-def entry_violations(entry: dict[str, Any]) -> list[str]:
-    for key in ("violations", "issues", "failed_checks", "failed_constraints"):
-        value = entry.get(key)
-        if isinstance(value, list):
-            rendered = []
-            for violation in value:
-                if isinstance(violation, dict):
-                    rule = str(violation.get("rule") or violation.get("constraint") or violation.get("check") or "rule")
-                    message = str(violation.get("message") or violation.get("detail") or violation.get("reason") or "")
-                    rendered.append(f"{rule}: {message}".strip())
-                else:
-                    rendered.append(str(violation))
-            return rendered
-    return []
-
-
-def score_round(report: Any, chain_count: int) -> dict[str, Any]:
-    entries = constraint_entries(report)
-    counts = {"PASS": 0, "WARNING": 0, "FAIL": 0, "N/A": 0, "UNKNOWN": 0}
-    unresolved: list[dict[str, Any]] = []
-    for entry in entries:
-        status = entry_status(entry)
-        counts[status if status in counts else "UNKNOWN"] += 1
-        if status != "PASS":
-            unresolved.append({
-                "chain_id": str(entry.get("chain_id") or entry.get("id") or "unknown"),
-                "status": status,
-                "violations": entry_violations(entry),
-            })
-    reported_chains = len(entries)
-    if reported_chains < chain_count:
-        unresolved.append({
-            "chain_id": "*",
-            "status": "MISSING_REPORT",
-            "violations": [
-                f"{chain_count - reported_chains} candidate chain(s) have no machine-readable constraint report and cannot be claimed feasible."
-            ],
-        })
-    return {
-        "chains_evaluated": chain_count,
-        "chains_reported": reported_chains,
-        "status_counts": counts,
-        "unresolved": unresolved,
-        "unresolved_count": len(unresolved),
-        "feasible": len(unresolved) == 0,
-    }
-
-
-def revision_directive(round_index: int, unresolved: list[dict[str, Any]]) -> str:
-    lines = [
-        f"Closed-loop revision directive (round {round_index}):",
-        "The previous candidate trains failed engineering constraint checks.",
-        "Do not repeat the failing chains listed below; propose replacement trains",
-        "that satisfy every declared constraint:",
-    ]
-    for item in unresolved:
-        lines.append(f"- {item['chain_id']} [{item['status']}]: {'; '.join(item['violations']) or 'no detail reported'}")
-    return "\n".join(lines)
-
-
-def pipeline_candidate_bundle(query: Any, top_k: int, normalized: Any, directive: str | None = None) -> Any:
-    from app.core.schemas import CandidatesBundle, UserQuery
-    from app.workflows.pipeline import WaterTreatmentPipeline
-
-    if directive is not None:
-        amended = dict(query.model_dump())
-        amended["context"] = f"{amended.get('context') or ''}\n\n{directive}".strip()
-        query = UserQuery(**amended)
-    report = model_json(WaterTreatmentPipeline().run(query, top_k=top_k))
-    recommendations = report.get("recommendations") if isinstance(report, dict) else None
-    if not isinstance(recommendations, list) or not recommendations:
-        raise ValueError("the pipeline returned no candidate trains to optimize")
-    items = []
-    for index, recommendation in enumerate(recommendations, start=1):
-        if not isinstance(recommendation, dict):
-            continue
-        chain = recommendation.get("chain")
-        if not isinstance(chain, list) or not chain:
-            continue
-        items.append({
-            "chain_id": str(recommendation.get("chain_id") or f"pipeline_{index}"),
-            "chain": chain,
-            "key_units": recommendation.get("key_units"),
-            "rationale": recommendation.get("rationale") or "Pipeline-generated train for closed-loop optimization",
-            "energy_intensity": recommendation.get("energy_intensity"),
-            "generates_brine": recommendation.get("generates_brine"),
-            "requires_disinfection": recommendation.get("requires_disinfection"),
-        })
-    if not items:
-        raise ValueError("the pipeline report contains no usable treatment trains")
-    return CandidatesBundle(query_id=normalized.query_id, candidates=candidate_chains(items))
-
-
-OPTIMIZE_LIMITATIONS = [
-    "This loop optimizes declared-constraint feasibility through the upstream critic; it does not establish treatment performance, target attainment, safety, or regulatory compliance.",
-    "A feasible result means every chain passed the machine-readable constraint checks, not that the train is sized, costed, or field-validated.",
-    "Critic auto-revisions and planner regeneration are deterministic upstream behaviors; request and output fingerprints do not freeze remote model behavior.",
-]
-
-
-def command_optimize(args: argparse.Namespace) -> dict[str, Any]:
-    from app.agents.critic_agent import ConstraintCriticAgent
-    from app.agents.parser_agent import TaskParserAgent
-
-    if not 1 <= args.max_rounds <= 8:
-        raise ValueError("max-rounds must be between 1 and 8")
-    query = load_user_query(args)
-    normalized = TaskParserAgent().run(query)
-    data, preservation = retain_declared_context(normalized, query)
-
-    if args.candidates_json is not None or args.candidates_file is not None:
-        bundle = candidate_bundle(args, normalized)
-        initial_source = "caller"
-    else:
-        bundle = pipeline_candidate_bundle(query, args.top_k, normalized)
-        initial_source = "pipeline"
-
-    rounds: list[dict[str, Any]] = []
-    status = "budget_exhausted"
-    directive_used = False
-    current_source = initial_source
-    pending_directive: str | None = None
-    for round_index in range(1, args.max_rounds + 1):
-        before = chain_signature(bundle)
-        report = model_json(ConstraintCriticAgent().run(bundle, normalized))
-        metrics = score_round(report, len(bundle_candidates(bundle)))
-        rounds.append({
-            "round": round_index,
-            "source": current_source,
-            "revision_directive": pending_directive,
-            "candidates_before": [list(chain) for chain in before],
-            "candidates_after_revision": model_json(bundle),
-            "constraint_report": report,
-            "metrics": metrics,
-        })
-        pending_directive = None
-        if metrics["feasible"]:
-            status = "feasible"
-            break
-        if round_index == args.max_rounds:
-            break
-        if chain_signature(bundle) == before:
-            directive = revision_directive(round_index, metrics["unresolved"])
-            try:
-                bundle = pipeline_candidate_bundle(query, args.top_k, normalized, directive)
-            except ValueError:
-                status = "stalled"
-                break
-            directive_used = True
-            current_source = "planner-regeneration"
-            pending_directive = directive
-        else:
-            current_source = "critic-revision"
-
-    final_entries = {str(entry.get("chain_id") or entry.get("id") or ""): entry for entry in constraint_entries(rounds[-1]["constraint_report"]) if rounds}
-    final_trains = []
-    for candidate in bundle_candidates(bundle):
-        entry = final_entries.get(str(candidate.get("chain_id", "")))
-        status_value = entry_status(entry) if entry is not None else "UNKNOWN"
-        if status_value == "PASS":
-            final_trains.append({
-                "chain_id": str(candidate.get("chain_id", "")),
-                "chain": [str(unit) for unit in candidate.get("chain", [])],
-                "constraint_report": entry,
-            })
-    last_metrics = rounds[-1]["metrics"] if rounds else None
-    return {
-        "kind": "hydroweaver.closed-loop-optimization",
-        "adapter_version": ADAPTER_VERSION,
-        "query_id": getattr(normalized, "query_id", None),
-        "normalized_query": data,
-        "context_preservation": preservation,
-        "case_assessment": build_case_assessment(data),
-        "optimization": {
-            "status": status,
-            "rounds_used": len(rounds),
-            "max_rounds": args.max_rounds,
-            "top_k": args.top_k,
-            "initial_source": initial_source,
-            "planner_regeneration_used": directive_used,
-            "feasible_chains": len(final_trains),
-            "unresolved_count": last_metrics["unresolved_count"] if last_metrics else 0,
-            "unresolved": last_metrics["unresolved"] if last_metrics else [],
-        },
-        "rounds": rounds,
-        "final_trains": final_trains,
-        "limitations": OPTIMIZE_LIMITATIONS,
-    }
+    return parsed
 
 
 def command_check_constraints(args: argparse.Namespace) -> dict[str, Any]:
-    from app.agents.critic_agent import ConstraintCriticAgent
-    from app.agents.parser_agent import TaskParserAgent
-
     query = load_user_query(args)
-    normalized = TaskParserAgent().run(query)
-    candidates = candidate_bundle(args, normalized)
-    report = ConstraintCriticAgent().run(candidates, normalized)
-    data, preservation = retain_declared_context(normalized, query)
+    normalized, preservation = validate_and_normalize_query(query)
+    raw_cands = load_json_source(args.candidates_json, args.candidates_file, "candidates")
+    candidates = _parse_candidates_raw(raw_cands)
+
+    chain_reports: list[dict[str, Any]] = []
+    revised_candidates: list[dict[str, Any]] = []
+    for cand in candidates:
+        sim = simulate_train(normalized, cand["chain"], cand.get("parameters"))
+        diag = diagnose_simulation(normalized, sim, params_already_optimized=False)
+        chain_reports.append(
+            {
+                "chain_id": cand["chain_id"],
+                "chain": sim["chain"],
+                "overall_status": sim["overall_status"],
+                "feasible": sim["feasible"],
+                "lcow_usd_m3": sim["economics"]["lcow_usd_m3"],
+                "specific_energy_kWh_m3": sim["flowsheet"]["specific_energy_kWh_m3"],
+                "recovery_fraction": sim["flowsheet"]["recovery_fraction"],
+                "violations": sim["violations"],
+                "diagnosis": diag,
+            }
+        )
+        revised_candidates.append(
+            {
+                "chain_id": cand["chain_id"],
+                "chain": sim["chain"],
+                "parameters": sim["parameters"],
+                "economics": sim["economics"],
+                "flowsheet": sim["flowsheet"],
+            }
+        )
     return {
-        "normalized_query": data,
+        "normalized_query": normalized,
         "context_preservation": preservation,
-        "candidates_after_revision": model_json(candidates),
-        "constraint_report": model_json(report),
+        "candidates_after_revision": {"query_id": normalized["query_id"], "candidates": revised_candidates},
+        "constraint_report": {"chain_reports": chain_reports},
+    }
+
+
+def command_optimize(args: argparse.Namespace) -> dict[str, Any]:
+    if not 1 <= args.max_rounds <= 12:
+        raise ValueError("max-rounds must be between 1 and 12")
+    if not 1 <= args.max_sim_calls <= 500:
+        raise ValueError("max-sim-calls must be between 1 and 500")
+    query = load_user_query(args)
+    initial_cands = None
+    if args.candidates_json is not None or args.candidates_file is not None:
+        initial_cands = _parse_candidates_raw(
+            load_json_source(args.candidates_json, args.candidates_file, "candidates")
+        )
+    return run_closed_loop_optimization(
+        query,
+        initial_candidates=initial_cands,
+        top_k=args.top_k,
+        max_rounds=args.max_rounds,
+        max_sim_calls=args.max_sim_calls,
+    )
+
+
+def command_simulate(args: argparse.Namespace) -> dict[str, Any]:
+    query = load_user_query(args)
+    normalized, preservation = validate_and_normalize_query(query)
+    raw_chain = load_json_source(args.chain_json, args.chain_file, "chain")
+    if not isinstance(raw_chain, list) or not raw_chain or not all(isinstance(u, str) for u in raw_chain):
+        raise ValueError("chain must be a non-empty JSON string array")
+    params = None
+    if args.params_json is not None or args.params_file is not None:
+        raw_params = load_json_source(args.params_json, args.params_file, "params")
+        if not isinstance(raw_params, dict):
+            raise ValueError("params must be a JSON object")
+        params = raw_params
+    sim = simulate_train(normalized, raw_chain, params)
+    diag = diagnose_simulation(normalized, sim, params_already_optimized=False)
+    return {
+        "normalized_query": normalized,
+        "context_preservation": preservation,
+        **sim,
+        "diagnosis": diag,
     }
 
 
 def command_build_indexes() -> dict[str, Any]:
-    from app.core.config import get_settings
-    from app.rag.index_builder import IndexBuilder
+    ingest_dir, index_dir = _kb_dirs()
+    index_dir.mkdir(parents=True, exist_ok=True)
+    chunks = kb_corpus_chunks()
+    for idx, rec in enumerate(_load_staged_records(), start=1):
+        chunks.append(
+            {
+                "id": str(rec.get("id") or rec.get("case_id") or f"staged-{idx}"),
+                "kind": str(rec.get("kb_type") or "staged"),
+                "data": rec,
+            }
+        )
+    corpus_path = index_dir / "corpus.jsonl"
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=".corpus.", suffix=".tmp", dir=index_dir)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            for chunk in chunks:
+                handle.write(json.dumps(json_safe_value(chunk), ensure_ascii=False))
+                handle.write("\n")
+        os.replace(tmp_name, corpus_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
 
-    count = IndexBuilder().build_all()
-    settings = get_settings()
     return {
         "status": "success",
-        "chunks_indexed": count,
-        "index_dir": str(settings.index_dir),
-        "corpus": str(Path(settings.index_dir) / "corpus.jsonl"),
-        "bm25_index": str(Path(settings.index_dir) / "bm25_index.pkl"),
+        "chunks_indexed": len(chunks),
+        "builtin_chunks": len(kb_corpus_chunks()),
+        "staged_chunks": len(chunks) - len(kb_corpus_chunks()),
+        "index_dir": str(index_dir),
+        "corpus": str(corpus_path),
     }
 
 
@@ -1254,20 +530,18 @@ def safe_entry_id(data: dict[str, Any]) -> str:
 
 
 def command_ingest(args: argparse.Namespace) -> dict[str, Any]:
-    from app.core.config import get_settings
-
     data_path = resolve_external_path(args.data_file)
     with data_path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
         raise ValueError("ingest data must be a JSON object")
 
-    settings = get_settings()
-    kb_type = args.kb_type.replace("-", "_")
-    ingest_dir = Path(settings.data_dir) / "ingest"
+    ingest_dir, _ = _kb_dirs()
     ingest_dir.mkdir(parents=True, exist_ok=True)
+    kb_type = args.kb_type.replace("-", "_")
     target = ingest_dir / f"{kb_type}_{safe_entry_id(data)}.json"
-    write_json_file(data, str(target))
+    record = {**data, "kb_type": kb_type}
+    write_json_file(record, str(target))
 
     index_report = command_build_indexes() if args.rebuild else None
     return {
@@ -1276,119 +550,18 @@ def command_ingest(args: argparse.Namespace) -> dict[str, Any]:
         "staged_record": str(target),
         "index_rebuilt": bool(args.rebuild),
         "index_report": index_report,
-        "warning": (
-            "OpenAqua v1 stages ad-hoc records under data/ingest, while its stock IndexBuilder "
-            "reads the canonical unit-level tree and case-level/kb_cases.json. The staged record "
-            "is preserved for curation but is not automatically merged into those canonical sources."
-        ),
     }
-
-
-def load_script_module(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load Python module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(name, None)
-        raise
-    return module
-
-
-def command_evaluate_trains(repo: Path, args: argparse.Namespace) -> dict[str, Any]:
-    module = load_script_module(repo / "test_openaqua.py", "_hydroweaver_train_evaluation")
-    return module.evaluate_predictions(
-        resolve_external_path(args.benchmark_dir), resolve_external_path(args.predictions)
-    )
-
-
-def parse_k_values(raw: str) -> list[int]:
-    values: list[int] = []
-    for token in raw.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        value = int(token)
-        if value <= 0 or value > 1000:
-            raise ValueError("k values must be between 1 and 1000")
-        if value not in values:
-            values.append(value)
-    if not values:
-        raise ValueError("at least one k value is required")
-    return values
-
-
-def command_evaluate_retrieval(repo: Path, args: argparse.Namespace) -> dict[str, Any]:
-    module = load_script_module(repo / "test_retrieval.py", "_hydroweaver_retrieval_evaluation")
-    benchmark_dir = resolve_external_path(args.benchmark_dir)
-    cases = module.load_benchmark_cases(benchmark_dir)
-
-    # OpenAqua's current WContBench files store evidence under
-    # reference_answer.ranked_recommendations, while the bundled evaluator still
-    # looks for the older candidate_solutions field. Fill only empty gold sets so
-    # the adapter remains compatible with both layouts.
-    adapted_cases = 0
-    for path in sorted(benchmark_dir.glob("*.json")):
-        with path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        if not isinstance(data, dict):
-            continue
-        case_id = module.extract_case_id(data, fallback=path.stem)
-        case = cases.get(case_id)
-        if case is None or case.get("gold_evidence"):
-            continue
-        ranked = data.get("reference_answer", {}).get("ranked_recommendations", [])
-        evidence: list[str] = []
-        if isinstance(ranked, list):
-            for recommendation in ranked:
-                if not isinstance(recommendation, dict):
-                    continue
-                values = recommendation.get("evidence_list", [])
-                if isinstance(values, list):
-                    evidence.extend(module.normalize_text(value) for value in values)
-        case["gold_evidence"] = module.unique_preserve_order(
-            value for value in evidence if value
-        )
-        if case["gold_evidence"]:
-            adapted_cases += 1
-
-    predictions = module.load_predictions(resolve_external_path(args.predictions))
-    report = module.evaluate_all_cases(cases, predictions, parse_k_values(args.k))
-    report["adapter_compatibility"] = {
-        "ranked_recommendation_evidence_cases": adapted_cases,
-        "note": (
-            "Filled empty evaluator gold sets from "
-            "reference_answer.ranked_recommendations[].evidence_list."
-        ),
-    }
-    return report
 
 
 _QUANTITATIVE_CLAIM = re.compile(
-    r"\b\d+(?:\.\d+)?\s*(?:%|mg/L|µg/L|ug/L|ng/L|NTU|kWh|USD|CNY)(?=$|\s|[.,;:)\]])",
+    r"\b\d+(?:\.\d+)?\s*(?:%|mg/L|µg/L|ug/L|ng/L|NTU|kWh|USD|\$/m3|\$/m³)(?=$|\s|[.,;:)\]])",
     re.IGNORECASE,
 )
 _ALLOWED_SUPPORT_TYPES = {"evidence_backed", "system_inference", "assumption"}
 
 
-def _audit_issue(
-    issues: list[dict[str, Any]],
-    code: str,
-    severity: str,
-    message: str,
-    location: str,
-) -> None:
-    issues.append(
-        {
-            "code": code,
-            "severity": severity,
-            "message": message,
-            "location": location,
-        }
-    )
+def _audit_issue(issues: list[dict[str, Any]], code: str, severity: str, message: str, location: str) -> None:
+    issues.append({"code": code, "severity": severity, "message": message, "location": location})
 
 
 def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -1396,10 +569,10 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
     with report_path.open("r", encoding="utf-8") as handle:
         report = json.load(handle)
     if not isinstance(report, dict):
-        raise ValueError("OpenAqua report must be a JSON object")
+        raise ValueError("HydroWeaver report must be a JSON object")
     recommendations = report.get("recommendations")
     if not isinstance(recommendations, list):
-        raise ValueError("OpenAqua report requires a recommendations array")
+        raise ValueError("HydroWeaver report requires a recommendations array")
 
     claim_ledger: list[dict[str, Any]] = []
     recommendation_audits: list[dict[str, Any]] = []
@@ -1407,73 +580,39 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
     support_counts = {support_type: 0 for support_type in sorted(_ALLOWED_SUPPORT_TYPES)}
     malformed_claims = 0
     if not recommendations:
-        _audit_issue(
-            all_issues,
-            "AUDIT-012",
-            "critical",
-            "The report contains no treatment recommendations to audit.",
-            "recommendations",
-        )
+        _audit_issue(all_issues, "AUDIT-012", "critical", "The report contains no treatment recommendations to audit.", "recommendations")
 
-    for index, recommendation in enumerate(recommendations, start=1):
+    for index, rec in enumerate(recommendations, start=1):
         location = f"recommendations[{index - 1}]"
         issues: list[dict[str, Any]] = []
-        if not isinstance(recommendation, dict):
-            _audit_issue(
-                issues,
-                "AUDIT-001",
-                "critical",
-                "Recommendation is not a JSON object.",
-                location,
-            )
+        if not isinstance(rec, dict):
+            _audit_issue(issues, "AUDIT-001", "critical", "Recommendation is not a JSON object.", location)
             all_issues.extend(issues)
-            recommendation_audits.append(
-                {"index": index, "status": "fail", "issues": issues}
-            )
+            recommendation_audits.append({"index": index, "status": "fail", "issues": issues})
             continue
 
-        chain_id = str(recommendation.get("chain_id") or f"recommendation_{index}")
-        chain = recommendation.get("chain")
-        if not isinstance(chain, list) or not chain or not all(
-            isinstance(unit, str) and unit.strip() for unit in chain
-        ):
-            _audit_issue(
-                issues,
-                "AUDIT-002",
-                "critical",
-                "Recommendation has no valid ordered treatment chain.",
-                f"{location}.chain",
-            )
+        chain_id = str(rec.get("chain_id") or f"recommendation_{index}")
+        chain = rec.get("chain")
+        if not isinstance(chain, list) or not chain or not all(isinstance(u, str) and u.strip() for u in chain):
+            _audit_issue(issues, "AUDIT-002", "critical", "Recommendation has no valid ordered treatment chain.", f"{location}.chain")
 
-        evidence = recommendation.get("evidence")
+        evidence = rec.get("evidence")
         if not isinstance(evidence, list):
             evidence = []
-            _audit_issue(
-                issues,
-                "AUDIT-003",
-                "critical",
-                "Recommendation evidence is missing or is not an array.",
-                f"{location}.evidence",
-            )
+            _audit_issue(issues, "AUDIT-003", "critical", "Recommendation evidence is missing or is not an array.", f"{location}.evidence")
         evidence_backed = 0
-        for evidence_index, citation in enumerate(evidence, start=1):
-            citation_location = f"{location}.evidence[{evidence_index - 1}]"
+        for ev_idx, citation in enumerate(evidence, start=1):
+            cit_loc = f"{location}.evidence[{ev_idx - 1}]"
             if not isinstance(citation, dict):
                 malformed_claims += 1
-                _audit_issue(
-                    issues,
-                    "AUDIT-004",
-                    "critical",
-                    "Evidence citation is not a JSON object.",
-                    citation_location,
-                )
+                _audit_issue(issues, "AUDIT-004", "critical", "Evidence citation is not a JSON object.", cit_loc)
                 continue
             fields = {}
             invalid_fields = []
             for field in ("support_type", "claim", "source_id", "chunk_id", "text_excerpt"):
-                value = citation.get(field)
-                fields[field] = value.strip() if isinstance(value, str) else ""
-                if value is not None and not isinstance(value, str):
+                val = citation.get(field)
+                fields[field] = val.strip() if isinstance(val, str) else ""
+                if val is not None and not isinstance(val, str):
                     invalid_fields.append(field)
             support_type = fields["support_type"]
             claim = fields["claim"]
@@ -1483,9 +622,7 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
             valid_support = support_type in _ALLOWED_SUPPORT_TYPES
             structurally_complete = bool(claim) and valid_support and not invalid_fields
             if support_type == "evidence_backed":
-                structurally_complete = structurally_complete and bool(
-                    source_id and chunk_id and excerpt
-                )
+                structurally_complete = structurally_complete and bool(source_id and chunk_id and excerpt)
                 if structurally_complete:
                     evidence_backed += 1
             if not structurally_complete:
@@ -1495,13 +632,13 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
                     "AUDIT-005",
                     "critical" if support_type == "evidence_backed" or invalid_fields else "warning",
                     "Claim-evidence entry has missing text, non-string citation fields, or an unsupported support type.",
-                    citation_location,
+                    cit_loc,
                 )
             if valid_support:
                 support_counts[support_type] += 1
             claim_ledger.append(
                 {
-                    "claim_id": f"{chain_id}:evidence:{evidence_index}",
+                    "claim_id": f"{chain_id}:evidence:{ev_idx}",
                     "chain_id": chain_id,
                     "recommendation_index": index,
                     "claim": claim,
@@ -1513,15 +650,15 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
                 }
             )
 
-        assumptions = recommendation.get("assumptions")
+        assumptions = rec.get("assumptions")
         if isinstance(assumptions, list):
-            for assumption_index, assumption in enumerate(assumptions, start=1):
+            for a_idx, assumption in enumerate(assumptions, start=1):
                 if not isinstance(assumption, str) or not assumption.strip():
                     continue
                 support_counts["assumption"] += 1
                 claim_ledger.append(
                     {
-                        "claim_id": f"{chain_id}:assumption:{assumption_index}",
+                        "claim_id": f"{chain_id}:assumption:{a_idx}",
                         "chain_id": chain_id,
                         "recommendation_index": index,
                         "claim": assumption.strip(),
@@ -1533,86 +670,32 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
                     }
                 )
 
-        why_it_works = str(recommendation.get("why_it_works") or "")
+        why_it_works = str(rec.get("why_it_works") or "")
         if _QUANTITATIVE_CLAIM.search(why_it_works) and evidence_backed == 0:
-            _audit_issue(
-                issues,
-                "AUDIT-006",
-                "warning",
-                "The explanatory text contains a quantitative statement but no structurally complete evidence-backed citation.",
-                f"{location}.why_it_works",
-            )
+            _audit_issue(issues, "AUDIT-006", "warning", "Explanatory text contains a quantitative claim without an evidence-backed citation.", f"{location}.why_it_works")
         if evidence_backed == 0:
-            _audit_issue(
-                issues,
-                "AUDIT-007",
-                "warning",
-                "Recommendation has no structurally complete evidence-backed claim.",
-                f"{location}.evidence",
-            )
+            _audit_issue(issues, "AUDIT-007", "warning", "Recommendation has no structurally complete evidence-backed claim.", f"{location}.evidence")
 
-        constraint_report = recommendation.get("constraint_report")
+        constraint_report = rec.get("constraint_report")
         constraint_status = None
         if isinstance(constraint_report, dict):
             constraint_status = constraint_report.get("overall_status")
             if constraint_status == "FAIL":
-                _audit_issue(
-                    issues,
-                    "AUDIT-008",
-                    "critical",
-                    "Recommendation retains a failed constraint report.",
-                    f"{location}.constraint_report.overall_status",
-                )
+                _audit_issue(issues, "AUDIT-008", "critical", "Recommendation retains a failed constraint report.", f"{location}.constraint_report.overall_status")
             elif constraint_status in ("WARNING", "N/A"):
-                _audit_issue(
-                    issues,
-                    "AUDIT-014",
-                    "warning",
-                    "The constraint report declares a warning or an unavailable/not-applicable check, rather than a pass.",
-                    f"{location}.constraint_report.overall_status",
-                )
+                _audit_issue(issues, "AUDIT-014", "warning", "Constraint report declares a warning or N/A check rather than PASS.", f"{location}.constraint_report.overall_status")
             elif constraint_status != "PASS":
-                _audit_issue(
-                    issues,
-                    "AUDIT-013",
-                    "critical",
-                    "Constraint status is missing or is not a recognized OpenAqua status (PASS, WARNING, FAIL, N/A).",
-                    f"{location}.constraint_report.overall_status",
-                )
+                _audit_issue(issues, "AUDIT-013", "critical", "Constraint status is missing or unrecognized (expected PASS, WARNING, FAIL, N/A).", f"{location}.constraint_report.overall_status")
         else:
-            _audit_issue(
-                issues,
-                "AUDIT-009",
-                "critical",
-                "Recommendation has no machine-readable constraint report.",
-                f"{location}.constraint_report",
-            )
+            _audit_issue(issues, "AUDIT-009", "critical", "Recommendation has no machine-readable constraint report.", f"{location}.constraint_report")
 
-        uncertainty = recommendation.get("uncertainty")
+        uncertainty = rec.get("uncertainty")
         if uncertainty in (None, ""):
-            _audit_issue(
-                issues,
-                "AUDIT-010",
-                "warning",
-                "Recommendation does not declare uncertainty.",
-                f"{location}.uncertainty",
-            )
+            _audit_issue(issues, "AUDIT-010", "warning", "Recommendation does not declare uncertainty.", f"{location}.uncertainty")
         elif uncertainty == "insufficient_evidence":
-            _audit_issue(
-                issues,
-                "AUDIT-011",
-                "warning",
-                "Recommendation explicitly reports insufficient evidence.",
-                f"{location}.uncertainty",
-            )
+            _audit_issue(issues, "AUDIT-011", "warning", "Recommendation explicitly reports insufficient evidence.", f"{location}.uncertainty")
 
-        status = (
-            "fail"
-            if any(issue["severity"] == "critical" for issue in issues)
-            else "warn"
-            if issues
-            else "pass"
-        )
+        status = "fail" if any(i["severity"] == "critical" for i in issues) else "warn" if issues else "pass"
         recommendation_audits.append(
             {
                 "index": index,
@@ -1625,8 +708,8 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
         )
         all_issues.extend(issues)
 
-    critical_count = sum(issue["severity"] == "critical" for issue in all_issues)
-    warning_count = sum(issue["severity"] == "warning" for issue in all_issues)
+    critical_count = sum(i["severity"] == "critical" for i in all_issues)
+    warning_count = sum(i["severity"] == "warning" for i in all_issues)
     audit_status = "fail" if critical_count else "warn" if warning_count else "pass"
     return {
         "schema_version": 1,
@@ -1649,46 +732,67 @@ def command_audit_report(args: argparse.Namespace) -> dict[str, Any]:
         "issues": all_issues,
         "claim_ledger": claim_ledger,
         "limitations": [
-            "This audit checks structure, declared support type, constraint status, and selected quantitative-claim signals.",
-            "It does not establish semantic entailment, source quality, transferability, treatment performance, safety, or regulatory compliance.",
+            "Checks structural citation completeness, constraint feasibility, and uncertainty declarations.",
+            "Does not substitute for site-specific pilot testing or regulatory approval.",
         ],
     }
+
+
+def command_gym_tasks() -> dict[str, Any]:
+    return {
+        "kind": "hydroweaver.aquadesigngym-catalog",
+        "schema_version": 1,
+        "tasks": list_tasks(),
+        "admissible_actions": list(AquaDesignGymEnv.ADMISSIBLE_ACTIONS),
+        "admissible_units": list(CANONICAL_UNITS),
+        "perturbations": {k: v["description"] for k, v in PERTURBATION_PROFILES.items()},
+        "methods": {
+            name: {"family": meta["family"], "description": meta["description"]}
+            for name, meta in METHOD_REGISTRY.items()
+        },
+    }
+
+
+def command_gym_eval(args: argparse.Namespace) -> dict[str, Any]:
+    methods = [m.strip() for m in args.methods.split(",") if m.strip()] if args.methods else None
+    tasks = [t.strip() for t in args.tasks.split(",") if t.strip()] if args.tasks else None
+    perturbations = [p.strip() for p in args.perturbations.split(",") if p.strip()] if args.perturbations else None
+    return evaluate_benchmark(
+        methods=methods,
+        task_ids=tasks,
+        perturbations=perturbations,
+        max_sim_calls=args.max_sim_calls,
+        seed=args.seed,
+    )
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    repo = resolve_repo(args.repo)
 
     if args.version:
-        print(
-            f"hydroweaver-adapter {ADAPTER_VERSION} "
-            f"(OpenAqua {repository_revision(repo)}; Python {sys.version.split()[0]})"
-        )
+        print(f"hydroweaver-engine {ADAPTER_VERSION} (Python {sys.version.split()[0]})")
         return 0
     if args.command is None:
         parser.error("a command is required (or use --version)")
 
-    bootstrap(repo)
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
-        "health": lambda: command_health(repo),
-        "identity": lambda: command_identity(repo),
+        "health": command_health,
+        "identity": command_identity,
         "catalog": lambda: command_catalog(args),
         "normalize": lambda: command_normalize(args),
         "assess-case": lambda: command_assess_case(args),
-        "recommend": lambda: command_recommend(args),
         "retrieve": lambda: command_retrieve(args),
+        "recommend": lambda: command_recommend(args),
         "check-constraints": lambda: command_check_constraints(args),
         "optimize": lambda: command_optimize(args),
+        "simulate": lambda: command_simulate(args),
         "build-indexes": command_build_indexes,
         "ingest": lambda: command_ingest(args),
-        "evaluate-trains": lambda: command_evaluate_trains(repo, args),
-        "evaluate-retrieval": lambda: command_evaluate_retrieval(repo, args),
         "audit-report": lambda: command_audit_report(args),
+        "gym-tasks": command_gym_tasks,
+        "gym-eval": lambda: command_gym_eval(args),
     }
-    # Upstream loggers attach to stdout. Keep stdout reserved for the adapter's
-    # single JSON document so callers can parse it reliably; diagnostics remain
-    # visible on stderr and in durable job logs.
     with contextlib.redirect_stdout(sys.stderr):
         payload = handlers[args.command]()
     emit(payload, getattr(args, "output", None))
@@ -1703,7 +807,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print(json.dumps({"ok": False, "error": "cancelled"}), file=sys.stderr)
         raise SystemExit(130)
-    except Exception as error:  # The adapter must always leave a concise machine-readable failure.
+    except Exception as error:
         print(
             json.dumps(
                 {

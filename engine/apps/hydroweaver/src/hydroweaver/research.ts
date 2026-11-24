@@ -18,7 +18,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { atomicWriteJson } from '../fs-utils';
 import { resolveUserPath } from '../paths';
-import { resolveOpenAquaBackend, runBackend, type OpenAquaBackend } from './backend';
+import { resolveHydroWeaverBackend, runBackend, type HydroWeaverBackend } from './backend';
 import {
   describeSimulationBackend,
   probeSimulation,
@@ -427,8 +427,8 @@ async function mutateTask(ctx: ResearchContext, id: string, expectedVersion: num
 
 async function ensureReady(ctx: ResearchContext, task: ResearchTask, paths: TaskPaths): Promise<boolean> {
   try {
-    const backend = resolveOpenAquaBackend(ctx.env, ctx.homeDir);
-    if (backend === undefined) throw new Error('No OpenAqua backend is configured.');
+    const backend = resolveHydroWeaverBackend(ctx.env, ctx.homeDir);
+    if (backend === undefined) throw new Error('No HydroWeaver backend is configured.');
     if (task.mandate.backend !== undefined && canonical(backend.command) !== canonical(task.mandate.backend.command)) {
       attention(task, 'configuration_drift', 'The backend command changed after the research mandate was frozen. Create a new task for a different backend.', []);
       saveTask(task, paths); return false;
@@ -499,7 +499,7 @@ async function launchAssignment(ctx: ResearchContext, task: ResearchTask, paths:
     const simulationProvenance = stage === 'simulation'
       ? await simulationStageProvenance(ctx, simulation!)
       : undefined;
-    const backend: OpenAquaBackend = stage === 'simulation'
+    const backend: HydroWeaverBackend = stage === 'simulation'
       ? { command: simulation!.command, source: simulation!.backend.source }
       : { command: frozen.command, source: frozen.source };
     const requestArgs: Record<string, unknown> = stage === 'audit'
@@ -523,7 +523,7 @@ async function launchAssignment(ctx: ResearchContext, task: ResearchTask, paths:
     } else if (provenance.inputs.length !== 1 || provenance.inputs[0]?.sha256 !== expectedInputHash) throw new Error('The staged job input differs from its verified research dependency.');
     spawnAttempted = true;
     // The simulation command already carries its own interpreter and runner path;
-    // every other stage runs through the frozen OpenAqua backend command.
+    // every other stage runs through the frozen HydroWeaver backend command.
     const command = stage === 'simulation' ? args : [...frozen.command, ...args];
     const job = startJob(ctx.jobsRoot, command, { workDir: task.mandate.workDir, env: ctx.env, label: `research:${task.id}:${stage}`, provenance, jobId });
     assignment.status = job.status;
@@ -862,12 +862,14 @@ function consumeAudit(ctx: ResearchContext, task: ResearchTask, paths: TaskPaths
 
 function scientificConfiguration(identity: Record<string, unknown>, env: NodeJS.ProcessEnv): Record<string, JsonValue> {
   const fields: Record<string, string[]> = {
-    models: ['openrouter_configured', 'default_model', 'planner_model', 'explanation_model', 'llm_temperature', 'llm_max_tokens'],
+    knowledge: ['units', 'contaminants', 'templates'],
+    optimization: ['joint_config_and_params', 'parameter_optimizer', 'diagnosis_router', 'shared_design_history'],
+    gym: ['benchmark', 'tasks', 'perturbations', 'baselines'],
     retrieval: ['top_k_retrieval', 'top_k_rerank', 'bm25_weight', 'embedding_weight', 'embedding_model'],
     planning: ['top_k_recommendations', 'max_planning_candidates', 'max_critic_iterations'],
   };
   const result: Record<string, JsonValue> = {};
-  for (const name of ['adapter_version', 'backend_revision', 'python']) {
+  for (const name of ['adapter_version', 'backend_revision', 'engine_mode', 'python']) {
     const value = identity[name];
     if (typeof value === 'string' || typeof value === 'number') result[name] = value;
   }
@@ -882,7 +884,7 @@ function scientificConfiguration(identity: Record<string, unknown>, env: NodeJS.
     result[section] = selected;
   }
   const overrides: Record<string, JsonValue> = {};
-  for (const key of ['HYDROWEAVER_OPENROUTER_MODEL', 'HYDROWEAVER_DEFAULT_MODEL', 'HYDROWEAVER_PLANNER_MODEL', 'HYDROWEAVER_EXPLANATION_MODEL', 'DEFAULT_MODEL', 'PLANNER_MODEL', 'EXPLANATION_MODEL', 'LLM_TEMPERATURE', 'LLM_MAX_TOKENS', 'TOP_K_RETRIEVAL', 'TOP_K_RERANK', 'BM25_WEIGHT', 'EMBEDDING_WEIGHT', 'EMBEDDING_MODEL', 'TOP_K_RECOMMENDATIONS', 'MAX_PLANNING_CANDIDATES', 'MAX_CRITIC_ITERATIONS']) {
+  for (const key of ['HYDROWEAVER_PYTHON', 'HYDROWEAVER_SIM_PYTHON', 'HYDROWEAVER_DEFAULT_MODEL', 'HYDROWEAVER_PLANNER_MODEL', 'HYDROWEAVER_EXPLANATION_MODEL']) {
     if (env[key] !== undefined) overrides[key] = env[key].slice(0, 4_000);
   }
   result['environment_overrides'] = overrides;
@@ -1158,8 +1160,8 @@ function containsDeclared(actual: unknown, expected: unknown): boolean {
   return canonical(actual) === canonical(expected);
 }
 function validateQuery(query: Record<string, unknown>): void {
-  if (!['raw_query', 'source_water', 'water_quality', 'contaminants', 'treatment_targets', 'constraints', 'context'].some((field) => query[field] !== undefined)) throw new Error('Research query must use snake_case OpenAqua UserQuery fields.');
-  for (const key of ['waterQuality', 'treatmentTargets', 'sourceWater', 'rawQuery']) if (query[key] !== undefined) throw new Error('Research query files use snake_case OpenAqua UserQuery fields.');
+  if (!['raw_query', 'source_water', 'water_quality', 'contaminants', 'treatment_targets', 'constraints', 'context'].some((field) => query[field] !== undefined)) throw new Error('Research query must use snake_case HydroWeaver UserQuery fields.');
+  for (const key of ['waterQuality', 'treatmentTargets', 'sourceWater', 'rawQuery']) if (query[key] !== undefined) throw new Error('Research query files use snake_case HydroWeaver UserQuery fields.');
   for (const key of ['water_quality', 'treatment_targets', 'constraints']) if (query[key] !== undefined && query[key] !== null && !isRecord(query[key])) throw new Error(`Query ${key} must be a JSON object.`);
   if (query['contaminants'] !== undefined && (!Array.isArray(query['contaminants']) || !query['contaminants'].every((value: unknown) => typeof value === 'string'))) throw new Error('Query contaminants must be a string array.');
 }

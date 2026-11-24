@@ -2,16 +2,16 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "HydroWeaver 0.2.0-beta.1",
-  "documentNamespace": "https://github.com/zhaorui-bi/HydroWeaver/releases/tag/v0.2.0-beta.1/SBOM.spdx.json",
+  "name": "HydroWeaver 0.3.0-beta.1",
+  "documentNamespace": "https://github.com/zhaorui-bi/HydroWeaver/releases/tag/v0.3.0-beta.1/SBOM.spdx.json",
   "creationInfo": {
-    "created": "2026-11-24T00:00:00Z",
+    "created": "2026-11-25T00:00:00Z",
     "creators": [
       "Organization: HydroWeaver contributors",
       "Tool: pnpm-12.4.1",
       "Tool: scripts/generate-sbom.mjs"
     ],
-    "comment": "Production dependency graph for the vendored engine, OpenAqua-derived brand assets and compatibility metadata, plus Electron and self-hosted font components shipped by the desktop application."
+    "comment": "Production dependency graph for the vendored engine, Electron, and self-hosted font components shipped by the desktop application."
   },
   "packages": [
     {
@@ -77,8 +77,8 @@
     {
       "SPDXID": "SPDXRef-HydroWeaver",
       "name": "hydroweaver",
-      "versionInfo": "0.2.0-beta.1",
-      "downloadLocation": "git+https://github.com/zhaorui-bi/HydroWeaver.git#v0.2.0-beta.1",
+      "versionInfo": "0.3.0-beta.1",
+      "downloadLocation": "git+https://github.com/zhaorui-bi/HydroWeaver.git#v0.3.0-beta.1",
       "filesAnalyzed": false,
       "primaryPackagePurpose": "APPLICATION",
       "licenseConcluded": "MIT",
@@ -90,7 +90,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/zhaorui-bi/HydroWeaver@0.2.0-beta.1"
+          "referenceLocator": "pkg:github/zhaorui-bi/HydroWeaver@0.3.0-beta.1"
         }
       ]
     },
@@ -26503,27 +26503,6 @@
           "referenceLocator": "pkg:npm/%40moonshot-ai/monorepo@0.1.1"
         }
       ]
-    },
-    {
-      "SPDXID": "SPDXRef-Upstream-OpenAqua-0e39908",
-      "name": "OpenAqua",
-      "versionInfo": "0e39908",
-      "downloadLocation": "https://github.com/zhaorui-bi/OpenAqua/tree/0e3990817946f1786828fabbfa9ba4bc06af96e8",
-      "filesAnalyzed": false,
-      "primaryPackagePurpose": "OTHER",
-      "licenseConcluded": "MIT",
-      "licenseDeclared": "MIT",
-      "copyrightText": "Copyright (c) 2026 ElijahMoulton",
-      "supplier": "Person: ElijahMoulton",
-      "homepage": "https://github.com/zhaorui-bi/OpenAqua",
-      "externalRefs": [
-        {
-          "referenceCategory": "PACKAGE-MANAGER",
-          "referenceType": "purl",
-          "referenceLocator": "pkg:github/zhaorui-bi/OpenAqua@0e39908"
-        }
-      ],
-      "comment": "External backend compatibility target; the desktop package includes OpenAqua-derived brand assets but not the OpenAqua Python source or dataset."
     }
   ],
   "relationships": [
@@ -32296,11 +32275,6 @@
       "spdxElementId": "SPDXRef-HydroWeaver",
       "relationshipType": "CONTAINS",
       "relatedSpdxElement": "SPDXRef-RootPackage"
-    },
-    {
-      "spdxElementId": "SPDXRef-HydroWeaver",
-      "relationshipType": "CONTAINS",
-      "relatedSpdxElement": "SPDXRef-Upstream-OpenAqua-0e39908"
     }
   ]
 }

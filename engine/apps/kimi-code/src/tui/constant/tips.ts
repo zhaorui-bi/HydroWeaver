@@ -29,7 +29,7 @@ export const WORKING_TIPS: readonly ToolbarTip[] = [
           solo: true,
         },
         {
-          text: 'run status, inspect the taxonomy, and validate one case before a larger WContBench evaluation',
+          text: 'run status, inspect the taxonomy, and run closed-loop optimization on one case before an AquaDesignGym evaluation',
           priority: 2,
           solo: true,
         },

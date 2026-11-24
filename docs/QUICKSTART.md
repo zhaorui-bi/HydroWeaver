@@ -1,120 +1,84 @@
-# Quick start
+# Quickstart
 
-English | [简体中文](./zh-CN/QUICKSTART.md)
+[简体中文](./zh-CN/QUICKSTART.md) | **English**
 
-This guide installs HydroWeaver, connects an OpenAqua checkout, downloads the
-processed knowledge base, and runs a first closed-loop query.
+## 1. Prerequisites
 
-## 1. Requirements
+- **Node.js ≥ 24.15.0** and **npm 12**
+- **Python ≥ 3.10** (standard library only for the built-in scientific engine
+  and AquaDesignGym)
+- Optional: a separate Python environment with **WaterTAP / IDAES / Pyomo /
+  IPOPT** if you plan to run `hydroweaver_simulate_train`
 
-- Node.js 24.15.0+
-- npm 12
-- Python 3.10+
-- macOS, Linux, or Windows
-
-```bash
-node --version
-npm --version
-python3 --version
-```
-
-## 2. Install HydroWeaver
+## 2. Install & Build
 
 ```bash
 git clone https://github.com/zhaorui-bi/HydroWeaver.git
 cd HydroWeaver
+
 npm ci
 npm run setup
 ```
 
-## 3. Install OpenAqua and its data
+`npm run setup` builds the TypeScript CLI/MCP bundle, terminal UI bundle, and
+branded local Web UI.
 
-```bash
-git clone https://github.com/zhaorui-bi/OpenAqua.git
-cd OpenAqua
-git checkout 0e3990817946f1786828fabbfa9ba4bc06af96e8
-cd water_treatment_agent
-python3 -m venv .venv
-source .venv/bin/activate                 # Windows: .venv\Scripts\activate
-python -m pip install -r requirements.txt
-python -m pip install -U huggingface_hub
+## 3. Probe the Built-In Engine
 
-hf download zhaorui-bi/OpenAqua data.zip WContBench/ \
-  --repo-type dataset \
-  --revision cc2d3c620e8ada7c62fa922cf3a827d8b42889e3 \
-  --local-dir ../hf_openaqua
-unzip ../hf_openaqua/data.zip -d .
-```
-
-Because the archive already contains `data/`, extract it into
-`water_treatment_agent`; extracting into `data/` would create an invalid
-`data/data/` tree. The pinned Git and dataset revisions are this HydroWeaver
-release’s validation baseline. If you update either, record the new revision
-and rerun validation. The benchmark remains under `../hf_openaqua/WContBench/`.
-
-## 4. Configure HydroWeaver and the backend
-
-The conversational agent needs a provider. OpenAqua’s internal LLM stages can
-optionally use OpenRouter.
-
-```bash
-export DEEPSEEK_API_KEY="YOUR_KEY"
-export OPENROUTER_API_KEY="YOUR_OPTIONAL_OPENROUTER_KEY"
-
-cd /path/to/HydroWeaver
-./bin/hydroweaver onboard \
-  --provider deepseek \
-  --api-key-env DEEPSEEK_API_KEY \
-  --hydroweaver-repo /path/to/OpenAqua
-```
-
-Run `./bin/hydroweaver onboard` without flags for the interactive wizard.
-
-## 5. Verify and build indexes
+No external repository or manual dataset download is needed:
 
 ```bash
 ./bin/hydroweaver doctor --probe
-./bin/hydroweaver run "Inspect OpenAqua status and build indexes if the downloaded knowledge base is ready but indexes are missing."
+./bin/hydroweaver tools --json
 ```
 
-A healthy backend report should show installed Python dependencies, available
-`taxonomy.json`/TDB/case data, and non-empty generated indexes.
+If you want to pin a specific Python interpreter for `hydroweaver_cli.py`, pass
+`--hydroweaver-python /path/to/python3` or export `HYDROWEAVER_PYTHON`.
 
-## 6. Run a first query
+## 4. Configure a Conversational Model Provider (Optional for CLI/TUI/Web Chat)
 
 ```bash
-./bin/hydroweaver run '
-Use OpenAqua for groundwater containing arsenic at 150 µg/L.
-Target ≤10 µg/L, low budget, low operator skill, no brine disposal,
-and drinking-water use. Normalize the query, retrieve evidence, recommend
-three trains, optimize them until every chain passes the constraint checks,
-and explain constraints, risks, assumptions, and uncertainty.'
+export DEEPSEEK_API_KEY="YOUR_KEY"
+./bin/hydroweaver onboard --provider deepseek --api-key-env DEEPSEEK_API_KEY --yes
 ```
 
-Or start an interactive interface:
+Direct backend optimization (`hydroweaver optimize`) and AquaDesignGym
+benchmarking (`hydroweaver gym`) work offline with no conversational API key
+needed.
+
+## 5. Run Closed-Loop Joint Optimization
 
 ```bash
-./bin/hydroweaver       # full TUI
-./bin/hydroweaver chat  # lightweight REPL
-./bin/hydroweaver web   # browser
-npm start            # Electron desktop
+./bin/hydroweaver optimize \
+  --input examples/cases/arsenic-groundwater.json \
+  --top-k 3 \
+  --max-rounds 4 \
+  --max-sim-calls 60 \
+  --wait
+```
+
+## 6. Explore AquaDesignGym
+
+List the 12 standardized design tasks, admissible actions, perturbation regimes,
+and 12 registered baselines/ablations:
+
+```bash
+./bin/hydroweaver gym tasks
+```
+
+Run a matched-budget evaluation (`max_sim_calls = 60`, reproducible seed):
+
+```bash
+./bin/hydroweaver gym eval --max-sim-calls 60 --seed 42 --wait
+```
+
+## 7. Interactive Workbench Surfaces
+
+```bash
+./bin/hydroweaver       # Full TUI
+./bin/hydroweaver chat  # Plain terminal REPL
+./bin/hydroweaver web   # Local Web UI (prints authenticated URL)
+npm start               # Electron Desktop application
 ```
 
 On Windows, replace `./bin/hydroweaver` with `npm run cli --`.
-
-## 7. Close the loop
-
-```bash
-./bin/hydroweaver optimize --input case.json --top-k 3 --max-rounds 4 --wait
-```
-
-The command runs the closed-loop optimizer directly and prints the optimization
-record, including per-round constraint reports, the convergence status, and the
-feasible trains. Without `--wait` it returns a durable job id immediately.
-
-## Next steps
-
-- [README](../README.md) — tools, architecture, backend resolution, and limits.
-- [FAQ](./FAQ.md) — common setup and model questions.
-- [Troubleshooting](./TROUBLESHOOTING.md) — backend/data/index failures.
-- [Engineering workflow discipline](./SCIENTIFIC_WORKFLOWS.md) — reproducible studies and WContBench evaluation.

@@ -84,7 +84,7 @@ const child = (() => {
       stdio: ['ignore', logDescriptor, logDescriptor],
     });
   } catch (error) {
-    return finish(127, `failed to launch OpenAqua backend: ${errorMessage(error)}`);
+    return finish(127, `failed to launch HydroWeaver backend: ${errorMessage(error)}`);
   }
 })();
 
@@ -102,7 +102,7 @@ process.once('SIGINT', () => {
 });
 
 child.once('error', (error) => {
-  finish(127, `failed to launch OpenAqua backend: ${error.message}`);
+  finish(127, `failed to launch HydroWeaver backend: ${error.message}`);
 });
 child.once('close', (code, signal) => {
   finish(code ?? signalExitCode(signal), undefined, signal);

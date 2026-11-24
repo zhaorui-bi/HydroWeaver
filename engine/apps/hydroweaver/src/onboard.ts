@@ -6,14 +6,13 @@ import {
   mkdirSync,
   readdirSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { createInterface, type Interface } from 'node:readline';
 
 import { atomicWriteJson } from './fs-utils';
-import { createOpenAquaHarness, ensureOpenAquaSkillDirs, resolveOpenAquaHome } from './harness';
-import { ensureOpenAquaMcpJson } from './mcp/register';
+import { createHydroWeaverHarness, ensureHydroWeaverSkillDirs, resolveHydroWeaverHome } from './harness';
+import { ensureHydroWeaverMcpJson } from './mcp/register';
 import { resolveUserPath } from './paths';
 import { applyApiProvider, PROVIDER_PRESETS } from './providers';
 import {
@@ -21,17 +20,17 @@ import {
   describeBackend,
   parseCommand,
   probeBackend,
-  repoCommand,
-  resolveOpenAquaBackend,
+  pythonEngineCommand,
+  resolveHydroWeaverBackend,
   summarizeBackendHealth,
-  type OpenAquaBackend,
+  type HydroWeaverBackend,
 } from './hydroweaver/backend';
 
 export interface OnboardOptions {
   readonly yes?: boolean;
   readonly homeDir?: string;
   readonly hydroweaverCommand?: string;
-  readonly hydroweaverRepo?: string;
+  readonly hydroweaverPython?: string;
   readonly importFrom?: string;
   readonly provider?: string;
   readonly apiKey?: string;
@@ -48,7 +47,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
   const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : undefined;
   try {
     const homeDir = resolveUserPath(
-      options.homeDir ?? (await ask(rl, 'HydroWeaver home directory', resolveOpenAquaHome())),
+      options.homeDir ?? (await ask(rl, 'HydroWeaver home directory', resolveHydroWeaverHome())),
     );
     mkdirSync(homeDir, { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') chmodSync(homeDir, 0o700);
@@ -67,7 +66,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
 
     await setupModel(homeDir, options, rl);
 
-    const backend = await pickBackend(homeDir, options, rl);
+    const backend = await pickBackend(homeDir, options);
     if (backend !== undefined) {
       process.stdout.write(`hydroweaver backend: ${describeBackend(backend)}\n`);
       const wrapperBased = backend.command[0] === 'uv' || backend.command[0] === 'pixi';
@@ -83,7 +82,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
           process.stdout.write(`probe: ${summary}\n`);
         } else if (probe.code === 0) {
           process.stdout.write(
-            `probe incomplete (${summary}); the backend is recorded anyway — install data/build indexes and re-run \`hydroweaver doctor --probe\`.\n`,
+            `probe incomplete (${summary}); the backend is recorded anyway — fix the Python environment and re-run \`hydroweaver doctor --probe\`.\n`,
           );
         } else {
           process.stdout.write(
@@ -93,21 +92,21 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
       }
     } else {
       process.stdout.write(
-        'hydroweaver backend: NOT FOUND — research tools will report guidance until you set HYDROWEAVER_REPO, run `hydroweaver onboard --hydroweaver-repo /path/to/OpenAqua`, or provide an adapter-compatible HYDROWEAVER_COMMAND.\n',
+        'hydroweaver backend: NOT FOUND — research tools will report guidance until Python 3 is on PATH, HYDROWEAVER_PYTHON is set, `hydroweaver onboard --hydroweaver-python /path/to/python3` is run, or HYDROWEAVER_COMMAND is set.\n',
       );
     }
 
-    const mcpJson = ensureOpenAquaMcpJson(homeDir);
+    const mcpJson = ensureHydroWeaverMcpJson(homeDir);
     process.stdout.write(`mcp.json: hydroweaver server registered (${mcpJson})\n`);
 
-    const harness = createOpenAquaHarness(homeDir);
+    const harness = createHydroWeaverHarness(homeDir);
     try {
-      await ensureOpenAquaSkillDirs(harness);
+      await ensureHydroWeaverSkillDirs(harness);
     } finally {
       await harness.close();
     }
     process.stdout.write('skills: HydroWeaver operation and campaign skills registered\n');
-    restrictOpenAquaHomePermissions(homeDir);
+    restrictHydroWeaverHomePermissions(homeDir);
 
     process.stdout.write(
       ['', 'Done. Next:', '  hydroweaver doctor --probe', '  hydroweaver chat', '  hydroweaver web', ''].join('\n'),
@@ -118,7 +117,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
 }
 
 async function readDefaultModel(homeDir: string): Promise<string | undefined> {
-  const harness = createOpenAquaHarness(homeDir);
+  const harness = createHydroWeaverHarness(homeDir);
   try {
     return (await harness.getConfig()).defaultModel;
   } finally {
@@ -223,7 +222,7 @@ async function applyAndReport(
   homeDir: string,
   options: Parameters<typeof applyApiProvider>[1],
 ): Promise<void> {
-  const harness = createOpenAquaHarness(homeDir);
+  const harness = createHydroWeaverHarness(homeDir);
   try {
     const applied = await applyApiProvider(harness, options);
     process.stdout.write(
@@ -311,7 +310,7 @@ function restrictImportedPermissions(filePath: string): void {
   }
 }
 
-function restrictOpenAquaHomePermissions(homeDir: string): void {
+function restrictHydroWeaverHomePermissions(homeDir: string): void {
   if (process.platform === 'win32') return;
   chmodSync(homeDir, 0o700);
   for (const entry of [
@@ -330,50 +329,25 @@ function restrictOpenAquaHomePermissions(homeDir: string): void {
 async function pickBackend(
   homeDir: string,
   options: OnboardOptions,
-  rl: Interface | undefined,
-): Promise<OpenAquaBackend | undefined> {
+): Promise<HydroWeaverBackend | undefined> {
   if (options.hydroweaverCommand !== undefined) {
     const command = parseCommand(options.hydroweaverCommand);
     if (command === undefined) throw new Error('--hydroweaver-command cannot be empty');
     atomicWriteJson(path.join(homeDir, 'hydroweaver.json'), { command });
     return { command, source: 'cli flag' };
   }
-  if (options.hydroweaverRepo !== undefined) {
-    const repo = resolveUserPath(options.hydroweaverRepo);
-    const command = repoCommand(repo);
+  if (options.hydroweaverPython !== undefined) {
+    const python = resolveUserPath(options.hydroweaverPython);
+    const command = pythonEngineCommand(python, process.env);
     if (command === undefined) {
       throw new Error(
-        `--hydroweaver-repo is not a usable OpenAqua checkout or no Python interpreter is available: ${repo}`,
+        `--hydroweaver-python does not point to an executable Python interpreter or bundled engine is missing: ${python}`,
       );
     }
-    atomicWriteJson(path.join(homeDir, 'hydroweaver.json'), { repo });
-    return { command, source: `repo:${repo}` };
+    atomicWriteJson(path.join(homeDir, 'hydroweaver.json'), { python });
+    return { command, source: `python:${python}` };
   }
-  const existing = resolveOpenAquaBackend(process.env, homeDir);
-  if (existing !== undefined) return existing;
-
-  const repoCandidates = uniquePaths([
-    process.env['HYDROWEAVER_REPO'],
-    process.cwd(),
-    path.join(process.cwd(), '..', 'OpenAqua'),
-    path.join(homedir(), 'OpenAqua'),
-    path.join(homedir(), 'Desktop', 'OpenAqua'),
-    path.join(homedir(), 'Documents', 'OpenAqua'),
-  ]).filter((repo) => repoCommand(repo) !== undefined);
-  for (const repo of repoCandidates) {
-    const command = repoCommand(repo);
-    if (command === undefined) continue;
-    const use = await ask(
-      rl,
-      `OpenAqua repo found at ${repo}. Use it via \`${command.join(' ')}\`?`,
-      'y',
-    );
-    if (use.toLowerCase().startsWith('y')) {
-      atomicWriteJson(path.join(homeDir, 'hydroweaver.json'), { repo });
-      return { command, source: `repo:${repo}` };
-    }
-  }
-  return undefined;
+  return resolveHydroWeaverBackend(process.env, homeDir);
 }
 
 async function ask(rl: Interface | undefined, question: string, fallback = ''): Promise<string> {
@@ -384,14 +358,4 @@ async function ask(rl: Interface | undefined, question: string, fallback = ''): 
       resolve(answer.trim() !== '' ? answer.trim() : fallback);
     });
   });
-}
-
-function uniquePaths(candidates: readonly (string | undefined)[]): string[] {
-  return [
-    ...new Set(
-      candidates
-        .filter((candidate): candidate is string => candidate !== undefined && candidate.trim() !== '')
-        .map((candidate) => resolveUserPath(candidate)),
-    ),
-  ];
 }

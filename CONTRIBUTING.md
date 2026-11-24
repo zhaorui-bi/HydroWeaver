@@ -1,89 +1,67 @@
-# Contributing
+# Contributing to HydroWeaver
 
-Thank you for improving HydroWeaver.
+Contributions that improve optimization algorithms, physical/cost models,
+AquaDesignGym benchmarks, WaterTAP simulation coverage, workflow clarity, or
+cross-platform reliability are welcome.
 
 ## Development setup
 
 Requirements:
 
-- Node.js 24.15.0+
-- npm 12
-- Python 3.10+ for real-backend testing
+- Node.js **24.15.0 or newer**
+- npm **12**
+- Python **3.10 or newer** (standard library only for the default engine and CI)
+- Optional WaterTAP environment (`HYDROWEAVER_SIM_PYTHON`) for detailed
+  WaterTAP/IDAES/Pyomo/IPOPT flowsheet runs
 
 ```bash
+git clone https://github.com/zhaorui-bi/HydroWeaver.git
+cd HydroWeaver
 npm ci
 npm run setup
-npm run check
 ```
 
-Use `npm start` for Electron and `./bin/hydroweaver web` for the browser interface.
-Most product tests use fake adapter-compatible commands; an OpenAqua checkout
-and downloaded data are required only for real pipeline integration tests.
+Most TypeScript tests use fake backend fixtures and run without extra Python
+dependencies; Python scientific engine and AquaDesignGym tests use standard
+library `unittest`.
 
-## Change boundaries
+## Code & safety guidelines
 
-- Keep product work under `engine/apps/hydroweaver`, the root Electron
-  shell, packaging, scripts, or documentation whenever possible.
-- Avoid changing upstream Kimi Code behavior unless the change is independently
-  suitable for upstream; branded behavior must remain gated by the HydroWeaver
-  host identity.
-- Do not edit generated `dist/` or `web-ui/` files directly.
-- Treat `build/logo.png` as the canonical brand source and regenerate derived
-  icons with `scripts/make_icons.py`.
-- Preserve strict path, process, output-bound, configuration, and same-origin
-  security boundaries.
-- Keep the Python adapter compatible with the public OpenAqua project rather
-  than maintaining a private fork silently.
+1. Keep the scientific core cleanly separated:
+   - Domain knowledge, mechanistic simulator, numerical parameter optimizer,
+     violation diagnosis, shared design history, and closed-loop harness live
+     under `engine/apps/hydroweaver/hydroweaver_py/`.
+   - The benchmark environment, baselines, and component ablations live under
+     `engine/apps/hydroweaver/aquadesigngym/`.
+   - WaterTAP/IDAES/Pyomo/IPOPT integration lives under
+     `engine/apps/hydroweaver/sim/`.
+   - CLI/Web/TUI/MCP orchestration lives under `engine/apps/hydroweaver/src/`.
+2. Preserve local-first security invariants:
+   - Validate and resolve file paths strictly within allowed workspaces.
+   - Never invoke shell interpolation (`shell: false` in subprocess calls).
+   - Never log or serialize raw API keys into run manifests or config backups.
+3. Update corresponding tests when modifying MCP tool schemas, CLI arguments,
+   simulation behavior, or UI copy.
 
-## Packaging dependency compatibility
+## Verification
 
-The packaging overrides use current `@electron/asar`, `@electron/universal`,
-`glob`, and `minimatch` releases. Minimatch 11 uses a different internal
-matcher representation, so retaining the old glob 7 consumer would break
-file matching even if the dependency audit passed.
-
-The remaining `electron-winstaller` dependency still includes `temp` 0.9.4,
-whose cleanup calls use the old rimraf callback API. The postinstall step in
-`scripts/patch-packaging-dependencies.mjs` adapts only those calls to the
-supported rimraf API, retaining callback completion, synchronous cleanup,
-and retry settings. Exact version and source hashes guard the patch; an
-unexpected source fails installation, while an already patched source is
-accepted without another change. The Electron installation step is retained.
-
-Run `npm run test:packaging` to exercise archive roundtrips and unpacking,
-resource filters, glob cancellation, temporary-directory cleanup, and template
-consumers. This check also runs in `npm run check`. Remove the compatibility
-patch and its rimraf override together when the upstream installer/temp chain
-supports current rimraf directly or no longer depends on temp.
-
-## Engineering claims
-
-Describe outputs as evidence-grounded early-stage recommendations or benchmark
-results, not field-ready designs. Preserve units, evidence provenance,
-constraint failures, assumptions, uncertainty, and attempted-case denominators.
-Do not claim regulatory compliance or removal performance without direct,
-applicable evidence. See
-[`docs/SCIENTIFIC_WORKFLOWS.md`](./docs/SCIENTIFIC_WORKFLOWS.md).
-
-## Validation
-
-Before opening a pull request:
+Before opening a pull request, run the full repository check suite:
 
 ```bash
 npm run check
-npm run build
-npm audit --audit-level=low
 npm run audit:runtime
-python3 -m py_compile engine/apps/hydroweaver/backend/hydroweaver_cli.py
 ```
 
-For adapter changes, test at least `--version`, `health --json`, and the affected
-commands against a pinned OpenAqua checkout. For desktop changes, also run
-`npm run pack` and `npm run smoke:desktop` on the target platform.
+If you modified third-party license metadata or dependencies, regenerate
+attribution files first:
 
-## Pull requests
+```bash
+npm run licenses
+```
 
-Keep each pull request focused, explain behavior and risk, add tests, and update
-documentation/changelog when appropriate. Never commit credentials, `.env`
-files, private water-quality data, unpublished knowledge records, user homes,
-job logs, generated Web bundles, caches, or packaged applications.
+If you have a WaterTAP Python environment configured, verify real flowsheet
+simulation and NLP optimization against it as well:
+
+```bash
+python3 -m unittest discover -s engine/apps/hydroweaver/test-python -p "test_*.py" -v
+```

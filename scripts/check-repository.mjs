@@ -79,7 +79,6 @@ const requiredFiles = [
   'CITATION.cff',
   'CONTRIBUTING.md',
   'LICENSE',
-  'licenses/OpenAqua-MIT.txt',
   'README.md',
   'SECURITY.md',
   'licenses/THIRD_PARTY_NOTICES.md',
@@ -89,7 +88,11 @@ const requiredFiles = [
   'build/icon.ico',
   'scripts/check-adapter.mjs',
   'engine/apps/hydroweaver/backend/hydroweaver_cli.py',
+  'engine/apps/hydroweaver/hydroweaver_py/harness.py',
+  'engine/apps/hydroweaver/aquadesigngym/env.py',
+  'engine/apps/hydroweaver/sim/runner.py',
   'engine/apps/hydroweaver/test-python/test_hydroweaver_cli.py',
+  'engine/apps/hydroweaver/test-python/test_aquadesigngym.py',
   'docs/RELEASE.md',
   'docs/SCIENTIFIC_WORKFLOWS.md',
 ];
@@ -170,7 +173,6 @@ check(
 for (const destination of [
   'licenses/HYDROWEAVER_LICENSE',
   'licenses/KIMI_CODE_LICENSE',
-  'licenses/OPENAQUA_UPSTREAM_LICENSE',
   'licenses/THIRD_PARTY_NOTICES.md',
   'licenses/SBOM.spdx.json',
   'licenses/ELECTRON_LICENSE',

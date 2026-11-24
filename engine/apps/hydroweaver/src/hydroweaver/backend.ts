@@ -1,19 +1,19 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
 import { findPackageRoot } from '../paths';
 
-export interface OpenAquaBackend {
+export interface HydroWeaverBackend {
   readonly command: readonly string[];
   readonly source: string;
 }
 
-export interface OpenAquaBackendFileConfig {
+export interface HydroWeaverBackendFileConfig {
   readonly command?: readonly string[];
-  readonly repo?: string;
+  readonly python?: string;
 }
 
 export interface RunResult {
@@ -34,8 +34,8 @@ export interface RunCommandOptions {
   readonly maxOutputBytes?: number;
 }
 
-export class OpenAquaBackendConfigError extends Error {
-  override readonly name = 'OpenAquaBackendConfigError';
+export class HydroWeaverBackendConfigError extends Error {
+  override readonly name = 'HydroWeaverBackendConfigError';
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -43,10 +43,10 @@ const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const FORCE_KILL_DELAY_MS = 2_000;
 const OUTPUT_TRUNCATION_PREFIX = '… (truncated; showing the last output bytes)\n';
 
-export function resolveOpenAquaBackend(
+export function resolveHydroWeaverBackend(
   env: NodeJS.ProcessEnv = process.env,
   homeDir?: string,
-): OpenAquaBackend | undefined {
+): HydroWeaverBackend | undefined {
   const fromEnv = parseCommand(env['HYDROWEAVER_COMMAND']);
   if (fromEnv !== undefined) return { command: fromEnv, source: 'HYDROWEAVER_COMMAND' };
 
@@ -54,92 +54,47 @@ export function resolveOpenAquaBackend(
     const configPath = path.join(homeDir, 'hydroweaver.json');
     const config = readBackendConfig(configPath);
     if (config?.command !== undefined) return { command: config.command, source: configPath };
-    if (config?.repo !== undefined) {
-      const fromRepo = repoCommand(config.repo, env);
-      if (fromRepo !== undefined) return { command: fromRepo, source: `repo:${config.repo}` };
+    if (config?.python !== undefined) {
+      const cmd = pythonEngineCommand(config.python, env);
+      if (cmd !== undefined) return { command: cmd, source: configPath };
     }
   }
 
-  const repoEnv = env['HYDROWEAVER_REPO'];
-  if (repoEnv !== undefined && repoEnv.trim() !== '') {
-    const fromRepo = repoCommand(repoEnv, env);
-    if (fromRepo !== undefined) {
-      return { command: fromRepo, source: `HYDROWEAVER_REPO:${repoEnv}` };
+  const explicitPython = env['HYDROWEAVER_PYTHON']?.trim();
+  if (explicitPython !== undefined && explicitPython !== '') {
+    const cmd = pythonEngineCommand(explicitPython, env);
+    if (cmd !== undefined) {
+      return { command: cmd, source: `HYDROWEAVER_PYTHON:${explicitPython}` };
     }
   }
 
-  const onPath = findOnPath('hydroweaver', env);
-  if (onPath !== undefined && !isHarnessCli(onPath)) return { command: [onPath], source: 'PATH' };
-  return undefined;
-}
-
-function isHarnessCli(resolved: string): boolean {
-  try {
-    const wrapper = path.resolve(findPackageRoot(), '..', '..', '..', 'bin', 'hydroweaver');
-    return existsSync(wrapper) && realpathSync(wrapper) === realpathSync(resolved);
-  } catch {
-    return false;
-  }
-}
-
-export function repoCommand(
-  repo: string,
-  env: NodeJS.ProcessEnv = process.env,
-): readonly string[] | undefined {
-  const resolvedRepo = resolveRepositoryRoot(repo);
-  if (resolvedRepo === undefined) return undefined;
-  const adapter = backendAdapterPath();
-  if (!existsSync(adapter)) return undefined;
-
-  const python = repositoryPython(resolvedRepo, env);
-  if (python === undefined) return undefined;
-  return [...python, adapter, '--repo', resolvedRepo];
-}
-
-export function resolveRepositoryRoot(repo: string): string | undefined {
-  const resolved = expandHome(repo.trim());
-  if (isOpenAquaRepository(resolved)) return resolved;
-  if (
-    path.basename(resolved) === 'water_treatment_agent' &&
-    existsSync(path.join(resolved, 'requirements.txt')) &&
-    isOpenAquaRepository(path.dirname(resolved))
-  ) {
-    return path.dirname(resolved);
-  }
-  return undefined;
+  return builtInEngineBackend(env);
 }
 
 export function backendAdapterPath(): string {
   return path.join(findPackageRoot(), 'backend', 'hydroweaver_cli.py');
 }
 
-function repositoryPython(
-  repo: string,
-  env: NodeJS.ProcessEnv,
+export function pythonEngineCommand(
+  pythonExecutable: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): readonly string[] | undefined {
-  const explicit = env['HYDROWEAVER_PYTHON']?.trim();
-  if (explicit !== undefined && explicit !== '') {
-    const resolved = findOnPath(expandHome(explicit), env) ?? findOnPath(explicit, env);
-    if (resolved !== undefined) return [resolved];
-  }
+  const adapter = backendAdapterPath();
+  if (!existsSync(adapter)) return undefined;
+  const resolved = findOnPath(expandHome(pythonExecutable), env) ?? findOnPath(pythonExecutable, env);
+  if (resolved === undefined) return undefined;
+  return [resolved, adapter];
+}
 
-  const candidates =
-    process.platform === 'win32'
-      ? [
-          path.join(repo, '.venv', 'Scripts', 'python.exe'),
-          path.join(repo, 'venv', 'Scripts', 'python.exe'),
-          path.join(repo, 'water_treatment_agent', '.venv', 'Scripts', 'python.exe'),
-          path.join(repo, 'water_treatment_agent', 'venv', 'Scripts', 'python.exe'),
-        ]
-      : [
-          path.join(repo, '.venv', 'bin', 'python'),
-          path.join(repo, 'venv', 'bin', 'python'),
-          path.join(repo, 'water_treatment_agent', '.venv', 'bin', 'python'),
-          path.join(repo, 'water_treatment_agent', 'venv', 'bin', 'python'),
-        ];
-  const virtualEnvironment = candidates.find((candidate) => isExecutableFile(candidate));
-  if (virtualEnvironment !== undefined) return [virtualEnvironment];
+function builtInEngineBackend(env: NodeJS.ProcessEnv): HydroWeaverBackend | undefined {
+  const adapter = backendAdapterPath();
+  if (!existsSync(adapter)) return undefined;
+  const python = resolveSystemPython(env);
+  if (python === undefined) return undefined;
+  return { command: [...python, adapter], source: 'bundled-hydroweaver-engine' };
+}
 
+function resolveSystemPython(env: NodeJS.ProcessEnv): readonly string[] | undefined {
   const python3 = findOnPath('python3', env);
   if (python3 !== undefined) return [python3];
   const python = findOnPath('python', env);
@@ -151,15 +106,6 @@ function repositoryPython(
   return undefined;
 }
 
-function isOpenAquaRepository(repo: string): boolean {
-  return (
-    existsSync(path.join(repo, 'water_treatment_agent', 'requirements.txt')) &&
-    existsSync(path.join(repo, 'water_treatment_agent', 'app', 'workflows', 'pipeline.py')) &&
-    existsSync(path.join(repo, 'test_openaqua.py')) &&
-    existsSync(path.join(repo, 'test_retrieval.py'))
-  );
-}
-
 export function parseCommand(raw: string | undefined): readonly string[] | undefined {
   if (raw === undefined || raw.trim() === '') return undefined;
   const trimmed = raw.trim();
@@ -168,7 +114,7 @@ export function parseCommand(raw: string | undefined): readonly string[] | undef
     try {
       parsed = JSON.parse(trimmed) as unknown;
     } catch (error) {
-      throw new OpenAquaBackendConfigError(
+      throw new HydroWeaverBackendConfigError(
         `HYDROWEAVER_COMMAND must be a valid JSON string array: ${errorMessage(error)}`,
       );
     }
@@ -177,29 +123,29 @@ export function parseCommand(raw: string | undefined): readonly string[] | undef
   return validateCommand(splitCommandLine(trimmed), 'HYDROWEAVER_COMMAND');
 }
 
-export function readBackendConfig(filePath: string): OpenAquaBackendFileConfig | undefined {
+export function readBackendConfig(filePath: string): HydroWeaverBackendFileConfig | undefined {
   if (!existsSync(filePath)) return undefined;
   let data: unknown;
   try {
     data = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
   } catch (error) {
-    throw new OpenAquaBackendConfigError(
+    throw new HydroWeaverBackendConfigError(
       `Cannot parse ${filePath}; the file was left unchanged: ${errorMessage(error)}`,
     );
   }
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    throw new OpenAquaBackendConfigError(`${filePath} must contain a JSON object`);
+    throw new HydroWeaverBackendConfigError(`${filePath} must contain a JSON object`);
   }
   const record = data as Record<string, unknown>;
   const command =
     record['command'] === undefined
       ? undefined
       : validateCommand(record['command'], `${filePath}: command`);
-  const rawRepo = record['repo'];
-  if (rawRepo !== undefined && (typeof rawRepo !== 'string' || rawRepo.trim() === '')) {
-    throw new OpenAquaBackendConfigError(`${filePath}: repo must be a non-empty string`);
+  const rawPython = record['python'];
+  if (rawPython !== undefined && (typeof rawPython !== 'string' || rawPython.trim() === '')) {
+    throw new HydroWeaverBackendConfigError(`${filePath}: python must be a non-empty string`);
   }
-  return { command, repo: typeof rawRepo === 'string' ? rawRepo.trim() : undefined };
+  return { command, python: typeof rawPython === 'string' ? rawPython.trim() : undefined };
 }
 
 export function findOnPath(
@@ -223,18 +169,18 @@ export function findOnPath(
   return undefined;
 }
 
-export function describeBackend(backend: OpenAquaBackend | undefined): string {
+export function describeBackend(backend: HydroWeaverBackend | undefined): string {
   if (backend === undefined) return 'not found';
   return `${backend.command.join(' ')}  (via ${backend.source})`;
 }
 
 export function runBackend(
-  backend: OpenAquaBackend,
+  backend: HydroWeaverBackend,
   args: readonly string[],
   options: RunCommandOptions = {},
 ): Promise<RunResult> {
   const [command, ...prefixArgs] = backend.command;
-  if (command === undefined) return Promise.resolve(spawnFailure('OpenAqua backend command is empty'));
+  if (command === undefined) return Promise.resolve(spawnFailure('HydroWeaver backend command is empty'));
   return runCommand(command, [...prefixArgs, ...args], options);
 }
 
@@ -320,7 +266,7 @@ export function runCommand(
   });
 }
 
-export function probeBackend(backend: OpenAquaBackend, timeoutMs = 120_000): Promise<RunResult> {
+export function probeBackend(backend: HydroWeaverBackend, timeoutMs = 120_000): Promise<RunResult> {
   return runBackend(backend, ['health', '--json'], { timeoutMs });
 }
 
@@ -342,31 +288,18 @@ export function summarizeBackendHealth(result: RunResult): string {
   }
 
   const details: string[] = [];
-  const dependencies = parseObject(payload['dependencies']);
-  if (dependencies !== undefined) {
-    const missing = Object.entries(dependencies)
-      .filter(([, version]) => version === null)
-      .map(([name]) => name);
-    details.push(missing.length === 0 ? 'dependencies ready' : `missing dependencies: ${missing.join(', ')}`);
+  const kb = parseObject(payload['knowledge_base']);
+  if (kb !== undefined) {
+    const units = typeof kb['units'] === 'number' ? kb['units'] : '?';
+    const templates = typeof kb['templates'] === 'number' ? kb['templates'] : '?';
+    const chunks = typeof kb['chunk_count'] === 'number' ? kb['chunk_count'] : '?';
+    details.push(`KB ready (${String(units)} units, ${String(templates)} templates, ${String(chunks)} chunks)`);
   }
-  const data = parseObject(payload['data']);
-  if (data !== undefined) {
-    const missing: string[] = [];
-    if (data['taxonomy_available'] !== true) missing.push('taxonomy');
-    if (data['unit_kb_available'] !== true) missing.push('unit KB');
-    if (data['indexes_available'] !== true) missing.push('indexes');
-    if (data['indexes_available'] === true && data['chunk_count'] === 0) {
-      missing.push('non-empty indexes');
-    }
-    const chunkCount =
-      typeof data['chunk_count'] === 'number' || typeof data['chunk_count'] === 'string'
-        ? data['chunk_count']
-        : '?';
-    details.push(missing.length === 0 ? `indexes ready (${chunkCount} chunks)` : `missing data: ${missing.join(', ')}`);
-  }
-  if (payload['llm'] !== undefined) {
-    const llm = parseObject(payload['llm']);
-    if (llm !== undefined) details.push(llm['configured'] === true ? 'OpenRouter configured' : 'OpenRouter fallback mode');
+  const gym = parseObject(payload['aquadesigngym']);
+  if (gym !== undefined) {
+    const tasks = typeof gym['tasks'] === 'number' ? gym['tasks'] : '?';
+    const methods = typeof gym['methods'] === 'number' ? gym['methods'] : '?';
+    details.push(`AquaDesignGym ready (${String(tasks)} tasks, ${String(methods)} methods)`);
   }
   return details.join('; ') || `health ok=${String(payload['ok'])}`;
 }
@@ -377,7 +310,7 @@ function validateCommand(value: unknown, source: string): readonly string[] {
     value.length === 0 ||
     !value.every((part) => typeof part === 'string' && part.trim() !== '')
   ) {
-    throw new OpenAquaBackendConfigError(`${source} must be a non-empty array of non-empty strings`);
+    throw new HydroWeaverBackendConfigError(`${source} must be a non-empty array of non-empty strings`);
   }
   return value.map((part) => (part as string).trim());
 }
@@ -428,7 +361,7 @@ function splitCommandLine(raw: string): string[] {
     } else current += character;
   }
   if (quote !== undefined) {
-    throw new OpenAquaBackendConfigError('HYDROWEAVER_COMMAND contains an unterminated quote');
+    throw new HydroWeaverBackendConfigError('HYDROWEAVER_COMMAND contains an unterminated quote');
   }
   if (current !== '') parts.push(current);
   return parts;

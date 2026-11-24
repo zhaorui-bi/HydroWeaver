@@ -21,17 +21,17 @@ import { CliArgumentError, parseCliInvocation } from '../src/cli-args';
 import { runDoctor, formatDoctorReport } from '../src/doctor';
 import { atomicWriteText } from '../src/fs-utils';
 import { createDefaultSession, promptTurnToEnd } from '../src/harness';
-import { ensureOpenAquaMcpJson, mcpEnvironment } from '../src/mcp/register';
+import { ensureHydroWeaverMcpJson, mcpEnvironment } from '../src/mcp/register';
 import { runOnboard } from '../src/onboard';
-import { resolveJobStores, resolveOpenAquaHome, resolveUserPath } from '../src/paths';
+import { resolveJobStores, resolveHydroWeaverHome, resolveUserPath } from '../src/paths';
 import { validateProviderBaseUrl } from '../src/providers';
-import { openAquaTuiEnvironment } from '../src/tui';
+import { hydroWeaverTuiEnvironment } from '../src/tui';
 import {
   findOnPath,
   parseCommand,
   readBackendConfig,
   runCommand,
-  OpenAquaBackendConfigError,
+  HydroWeaverBackendConfigError,
 } from '../src/hydroweaver/backend';
 import {
   cancelJob,
@@ -45,7 +45,7 @@ import {
   startJob,
   waitForJob,
 } from '../src/hydroweaver/jobs';
-import { openAquaToolAnnotations, HYDROWEAVER_TOOLS } from '../src/hydroweaver/tools';
+import { hydroWeaverToolAnnotations, HYDROWEAVER_TOOLS } from '../src/hydroweaver/tools';
 import {
   describeSimulationBackend,
   parseSimulationSelfCheck,
@@ -123,26 +123,42 @@ describe('CLI arguments', () => {
         'onboard',
         '--hydroweaver-command',
         '["python","adapter.py"]',
-        '--hydroweaver-repo',
-        '/tmp/OpenAqua',
+        '--hydroweaver-python',
+        '/usr/bin/python3',
       ]),
     ).toThrow(/cannot be used together/);
   });
 
   it('parses the closed-loop optimize command with bounded budgets', () => {
-    expect(parseCliInvocation(['optimize', '--input', 'case.json', '--top-k', '4', '--max-rounds', '5', '--wait', '--home', 'home'])).toEqual({
-      kind: 'optimize', inputFile: 'case.json', topK: 4, maxRounds: 5, wait: true, homeDir: 'home',
+    expect(parseCliInvocation(['optimize', '--input', 'case.json', '--top-k', '4', '--max-rounds', '5', '--max-sim-calls', '80', '--wait', '--home', 'home'])).toEqual({
+      kind: 'optimize', inputFile: 'case.json', topK: 4, maxRounds: 5, maxSimCalls: 80, wait: true, homeDir: 'home',
     });
     expect(parseCliInvocation(['optimize', '--input', 'case.json'])).toEqual({
-      kind: 'optimize', inputFile: 'case.json', topK: undefined, maxRounds: undefined, wait: false, homeDir: undefined,
+      kind: 'optimize', inputFile: 'case.json', topK: undefined, maxRounds: undefined, maxSimCalls: undefined, wait: false, homeDir: undefined,
+    });
+    expect(parseCliInvocation(['gym', 'tasks', '--home', 'home'])).toEqual({
+      kind: 'gym', action: 'tasks', wait: false, homeDir: 'home',
+    });
+    expect(parseCliInvocation(['gym', 'eval', '--methods', 'HydroWeaver,RandomSearch', '--perturbations', 'nominal,mild_shift', '--max-sim-calls', '30', '--seed', '7', '--wait'])).toEqual({
+      kind: 'gym',
+      action: 'eval',
+      methods: ['HydroWeaver', 'RandomSearch'],
+      tasks: undefined,
+      perturbations: ['nominal', 'mild_shift'],
+      maxSimCalls: 30,
+      seed: 7,
+      wait: true,
+      homeDir: undefined,
     });
     for (const args of [
       ['optimize'],
       ['optimize', '--input', 'case.json', '--top-k', '0'],
       ['optimize', '--input', 'case.json', '--top-k', '11'],
-      ['optimize', '--input', 'case.json', '--max-rounds', '9'],
+      ['optimize', '--input', 'case.json', '--max-rounds', '13'],
+      ['optimize', '--input', 'case.json', '--max-sim-calls', '0'],
       ['optimize', '--input', 'case.json', '--max-rounds', 'two'],
       ['optimize', '--input', ''],
+      ['gym', 'eval', '--perturbations', 'unknown_shift'],
     ]) {
       expect(() => parseCliInvocation(args)).toThrow(CliArgumentError);
     }
@@ -237,16 +253,16 @@ describe('research CLI command boundary', () => {
 describe('runtime paths and private persistence', () => {
   it('expands user paths without inheriting the upstream Kimi home', () => {
     expect(resolveUserPath('~/aqua-work')).toBe(path.join(homedir(), 'aqua-work'));
-    expect(resolveOpenAquaHome({ HYDROWEAVER_HOME: '~/aqua-home' })).toBe(
+    expect(resolveHydroWeaverHome({ HYDROWEAVER_HOME: '~/aqua-home' })).toBe(
       path.join(homedir(), 'aqua-home'),
     );
-    expect(resolveOpenAquaHome({ KIMI_CODE_HOME: '/tmp/upstream-home' })).toBe(
+    expect(resolveHydroWeaverHome({ KIMI_CODE_HOME: '/tmp/upstream-home' })).toBe(
       path.join(homedir(), '.hydroweaver'),
     );
   });
 
   it('launches the upstream engine under the isolated HydroWeaver TUI identity', () => {
-    expect(openAquaTuiEnvironment('/tmp/aqua-home', { PATH: '/usr/bin' })).toMatchObject({
+    expect(hydroWeaverTuiEnvironment('/tmp/aqua-home', { PATH: '/usr/bin' })).toMatchObject({
       PATH: '/usr/bin',
       KIMI_CODE_HOME: '/tmp/aqua-home',
       KIMI_CODE_NO_AUTO_UPDATE: '1',
@@ -425,7 +441,7 @@ describe('HydroWeaver backend process handling', () => {
       '/tmp/repo with spaces',
       'hydroweaver',
     ]);
-    expect(() => parseCommand('[not-json]')).toThrow(OpenAquaBackendConfigError);
+    expect(() => parseCommand('[not-json]')).toThrow(HydroWeaverBackendConfigError);
 
     const dir = makeTempDir();
     const configPath = path.join(dir, 'hydroweaver.json');
@@ -466,7 +482,7 @@ describe('MCP configuration persistence', () => {
       `${JSON.stringify({ mcpServers: { existing: { command: 'example' } }, custom: true })}\n`,
     );
 
-    expect(ensureOpenAquaMcpJson(homeDir)).toBe(filePath);
+    expect(ensureHydroWeaverMcpJson(homeDir)).toBe(filePath);
     const config = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, any>;
     expect(config['custom']).toBe(true);
     expect(config['mcpServers']['existing']).toEqual({ command: 'example' });
@@ -478,23 +494,23 @@ describe('MCP configuration persistence', () => {
     const filePath = path.join(homeDir, 'mcp.json');
     writeFileSync(filePath, '{ malformed');
 
-    expect(() => ensureOpenAquaMcpJson(homeDir)).toThrow(/left unchanged/);
+    expect(() => ensureHydroWeaverMcpJson(homeDir)).toThrow(/left unchanged/);
     expect(readFileSync(filePath, 'utf8')).toBe('{ malformed');
   });
 
   it('forwards only the runtime overrides needed by the MCP server', () => {
     expect(
       mcpEnvironment('/tmp/home', {
-        HYDROWEAVER_REPO: '/tmp/repo',
+        HYDROWEAVER_PYTHON: '/usr/bin/python3',
         HYDROWEAVER_WORKDIR: '/tmp/work',
-        OPENROUTER_API_KEY: 'openrouter-test-key',
+        HYDROWEAVER_SIM_PYTHON: '/opt/watertap/bin/python',
         UNRELATED_SECRET: 'do-not-copy',
       }),
     ).toEqual({
       HYDROWEAVER_HOME: '/tmp/home',
-      HYDROWEAVER_REPO: '/tmp/repo',
+      HYDROWEAVER_PYTHON: '/usr/bin/python3',
       HYDROWEAVER_WORKDIR: '/tmp/work',
-      OPENROUTER_API_KEY: 'openrouter-test-key',
+      HYDROWEAVER_SIM_PYTHON: '/opt/watertap/bin/python',
     });
   });
 });
@@ -507,52 +523,59 @@ describe('HydroWeaver tool catalog', () => {
     const assess = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_assess_case');
     const audit = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_audit_report');
     const recommend = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_recommend');
+    const optimize = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_optimize_trains');
     const constraints = HYDROWEAVER_TOOLS.find(
       (tool) => tool.name === 'hydroweaver_check_constraints',
     );
-    const retrievalEval = HYDROWEAVER_TOOLS.find(
-      (tool) => tool.name === 'hydroweaver_evaluate_retrieval',
-    );
+    const gymTasks = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_gym_tasks');
+    const gymEval = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_evaluate_gym');
     expect(assess?.inputSchema['waterQuality']).toBeDefined();
     expect(audit?.inputSchema['reportFile']).toBeDefined();
     expect(recommend?.inputSchema['waterQuality']).toBeDefined();
     expect(recommend?.inputSchema['topK']?.safeParse(11).success).toBe(false);
+    expect(optimize?.inputSchema['maxSimCalls']?.safeParse(0).success).toBe(false);
     expect(constraints?.inputSchema['candidateChains']?.safeParse([]).success).toBe(false);
-    expect(retrievalEval?.inputSchema['kValues']?.safeParse([0]).success).toBe(false);
-    expect(openAquaToolAnnotations('hydroweaver_catalog')).toMatchObject({
+    expect(gymTasks).toBeDefined();
+    expect(gymEval?.inputSchema['maxSimCalls']?.safeParse(4).success).toBe(false);
+    expect(hydroWeaverToolAnnotations('hydroweaver_catalog')).toMatchObject({
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
     });
-    expect(openAquaToolAnnotations('hydroweaver_normalize_query')).toMatchObject({
+    expect(hydroWeaverToolAnnotations('hydroweaver_gym_tasks')).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(hydroWeaverToolAnnotations('hydroweaver_normalize_query')).toMatchObject({
       readOnlyHint: true,
       openWorldHint: true,
     });
-    expect(openAquaToolAnnotations('hydroweaver_assess_case')).toMatchObject({
+    expect(hydroWeaverToolAnnotations('hydroweaver_assess_case')).toMatchObject({
       readOnlyHint: true,
       openWorldHint: true,
     });
-    expect(openAquaToolAnnotations('hydroweaver_audit_report')).toMatchObject({
+    expect(hydroWeaverToolAnnotations('hydroweaver_audit_report')).toMatchObject({
       readOnlyHint: false,
       idempotentHint: true,
       openWorldHint: false,
     });
-    expect(openAquaToolAnnotations('hydroweaver_job_manifest').readOnlyHint).toBe(true);
-    expect(openAquaToolAnnotations('hydroweaver_job_cancel').destructiveHint).toBe(true);
-    expect(openAquaToolAnnotations('hydroweaver_recommend').idempotentHint).toBe(false);
-    expect(openAquaToolAnnotations('hydroweaver_research_status')).toMatchObject({
+    expect(hydroWeaverToolAnnotations('hydroweaver_job_manifest').readOnlyHint).toBe(true);
+    expect(hydroWeaverToolAnnotations('hydroweaver_job_cancel').destructiveHint).toBe(true);
+    expect(hydroWeaverToolAnnotations('hydroweaver_recommend').idempotentHint).toBe(false);
+    expect(hydroWeaverToolAnnotations('hydroweaver_research_status')).toMatchObject({
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
     });
-    expect(openAquaToolAnnotations('hydroweaver_research_list').readOnlyHint).toBe(true);
+    expect(hydroWeaverToolAnnotations('hydroweaver_research_list').readOnlyHint).toBe(true);
     expect(assess?.strictInput).toBeUndefined();
     expect(HYDROWEAVER_TOOLS.filter((tool) => tool.name.startsWith('hydroweaver_research_'))).toHaveLength(6);
     for (const tool of HYDROWEAVER_TOOLS.filter((item) => item.name.startsWith('hydroweaver_research_'))) {
       expect(tool.strictInput).toBe(true);
     }
     for (const name of ['create', 'advance', 'respond', 'cancel']) {
-      expect(openAquaToolAnnotations(`hydroweaver_research_${name}`).readOnlyHint).toBe(false);
+      expect(hydroWeaverToolAnnotations(`hydroweaver_research_${name}`).readOnlyHint).toBe(false);
     }
   });
 
@@ -731,7 +754,7 @@ describe('background jobs', () => {
           ]),
           HYDROWEAVER_WORKDIR: workDir,
           HYDROWEAVER_PLANNER_MODEL: 'environment/planner',
-          OPENROUTER_API_KEY: 'must-not-persist',
+          HYDROWEAVER_SECRET_TOKEN: 'must-not-persist',
         },
       },
     );
@@ -842,9 +865,9 @@ describe('background jobs', () => {
     writeFileSync(path.join(splitDir, 'case.json'), '{"case_id":"case-1"}\n');
     writeFileSync(predictions, '[]\n');
     const evaluate = HYDROWEAVER_TOOLS.find(
-      (tool) => tool.name === 'hydroweaver_evaluate_trains',
+      (tool) => tool.name === 'hydroweaver_evaluate_gym',
     );
-    if (evaluate === undefined) throw new Error('train evaluation tool is missing');
+    if (evaluate === undefined) throw new Error('gym evaluation tool is missing');
     const ctx = {
       jobsRoot,
       env: {
@@ -860,7 +883,9 @@ describe('background jobs', () => {
     const firstLaunch = await evaluate.run(
       {
         benchmarkDir: 'benchmark',
-        predictions: 'predictions.json',
+        methods: ['HydroWeaver'],
+        perturbations: ['nominal'],
+        maxSimCalls: 20,
         output: 'first.json',
       },
       ctx,
@@ -885,7 +910,9 @@ describe('background jobs', () => {
     const secondLaunch = await evaluate.run(
       {
         benchmarkDir: 'benchmark',
-        predictions: 'predictions.json',
+        methods: ['HydroWeaver'],
+        perturbations: ['nominal'],
+        maxSimCalls: 20,
         output: 'second.json',
       },
       ctx,
@@ -1107,27 +1134,27 @@ describe('simulation backend', () => {
     expect(parseSimulationSelfCheck('not json')).toBeUndefined();
   });
 
-  it('forwards the simulation interpreter to the MCP server environment', () => {
+  it('forwards the simulation and python engine interpreters to the MCP server environment', () => {
     const env = mcpEnvironment('/tmp/home', {
       HYDROWEAVER_SIM_PYTHON: '/opt/watertap/bin/python',
-      HYDROWEAVER_REPO: '/tmp/OpenAqua',
-      OPENROUTER_API_KEY: 'secret-value',
+      HYDROWEAVER_PYTHON: '/usr/bin/python3',
+      UNLISTED_TOKEN: 'do-not-forward',
     });
     expect(env['HYDROWEAVER_SIM_PYTHON']).toBe('/opt/watertap/bin/python');
-    expect(env['HYDROWEAVER_REPO']).toBe('/tmp/OpenAqua');
+    expect(env['HYDROWEAVER_PYTHON']).toBe('/usr/bin/python3');
     expect(env['HYDROWEAVER_HOME']).toBe('/tmp/home');
-    expect(env['OPENROUTER_API_KEY']).toBe('secret-value');
+    expect(env['UNLISTED_TOKEN']).toBeUndefined();
   });
 
   it('exposes the simulation tool with a bounded, documented contract', () => {
     const tool = HYDROWEAVER_TOOLS.find((entry) => entry.name === 'hydroweaver_simulate_train');
     expect(tool).toBeDefined();
     expect(Object.keys(tool!.inputSchema)).toEqual(
-      expect.arrayContaining(['queryFile', 'chain', 'waterRecovery', 'feedSalinityGL', 'designFlowM3Day', 'output', 'wait']),
+      expect.arrayContaining(['queryFile', 'chain', 'optimizeDesign', 'waterRecovery', 'feedSalinityGL', 'designFlowM3Day', 'output', 'wait']),
     );
     expect(tool!.description).toContain('do NOT predict trace-contaminant rejection');
     expect(tool!.description).toContain('unconverged');
-    expect(openAquaToolAnnotations('hydroweaver_simulate_train').readOnlyHint).toBe(false);
+    expect(hydroWeaverToolAnnotations('hydroweaver_simulate_train').readOnlyHint).toBe(false);
   });
 });
 

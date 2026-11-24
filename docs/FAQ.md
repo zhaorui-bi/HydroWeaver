@@ -1,111 +1,70 @@
-# Frequently asked questions
+# Frequently Asked Questions
 
-English | [简体中文](./zh-CN/FAQ.md)
+[简体中文](./zh-CN/FAQ.md) | **English**
 
 ### What is HydroWeaver?
 
-It is an independent local workbench around the open-source OpenAqua
-water-treatment research framework. It adds an agent interface, MCP tools,
-durable jobs, provenance, CLI/TUI/Web/desktop surfaces, setup, diagnostics, and
-packaging.
+HydroWeaver is a standalone agentic workbench for jointly designing
+water-treatment train configurations and continuous operating parameters under
+water-quality, resource, and cost constraints, paired with the **AquaDesignGym**
+benchmarking environment and optional **WaterTAP** process simulation.
 
-### Does this repository include OpenAqua and its dataset?
+### Does HydroWeaver require any external repository or dataset?
 
-No. HydroWeaver includes an adapter, not the OpenAqua source, Python
-dependencies, processed knowledge base, or WContBench. Clone OpenAqua separately
-and download `zhaorui-bi/OpenAqua` from Hugging Face.
+No. HydroWeaver includes its own complete Python scientific engine
+(`hydroweaver_py`), local knowledge corpus & staging indexes, and the
+AquaDesignGym benchmark (`aquadesigngym`), all runnable using Python 3.10+
+standard library alone.
 
-### Why are there two model configurations?
+### How does the closed-loop optimizer differ from one-shot prompting?
 
-HydroWeaver, built on the Kimi Code engine, needs a conversational model to plan and call tools.
-OpenAqua optionally uses OpenRouter for natural-language parsing, planning, and
-explanation. They are separate credentials. OpenAqua can run fallback logic
-without `OPENROUTER_API_KEY`, but natural-language quality is lower.
+One-shot generation picks plausible unit names without verifying quantitative
+mass balances, osmotic pressure, scaling (`hardness × CF`), fouling, CT
+disinfection, brine limits, SEC, or LCOW. HydroWeaver couples:
 
-### Can I avoid sending water-quality data to a remote model?
+1. knowledge-informed candidate generation,
+2. bounded coordinate + Hooke–Jeeves numerical operating-parameter optimization,
+3. mechanistic simulation & violation diagnosis,
+4. routing between `refine_parameters` and `revise_structure`, and
+5. a `SharedDesignHistory` preventing cyclic structural edits.
 
-Use structured fields and leave `OPENROUTER_API_KEY` unset to keep OpenAqua in
-its rule/template fallback mode. The conversational agent provider may still
-receive your prompt and tool output. For sensitive data, use an approved local
-or private provider and follow your organization’s data policy.
+### What is AquaDesignGym?
 
-### How is the backend located?
+AquaDesignGym evaluates competing synthesis methods (HydroWeaver, conventional
+optimizers, agent baselines, and component ablations) under matched simulation
+call budgets (`max_sim_calls`) across 12 standardized tasks and 3 influent
+perturbation regimes (`nominal`, `mild_shift`, `severe_shift`).
 
-Use `hydroweaver onboard --hydroweaver-repo /path/to/OpenAqua`, set
-`HYDROWEAVER_REPO`, or provide an adapter-compatible `HYDROWEAVER_COMMAND`.
-HydroWeaver recognizes virtual environments at the repository root and under
-`water_treatment_agent/`; `HYDROWEAVER_PYTHON` overrides interpreter selection.
+### What is the role of `HYDROWEAVER_SIM_PYTHON`?
 
-### Why does status say the backend is healthy but data are missing?
+By default, HydroWeaver runs its fast pure-Python mechanistic & costing engine
+(`hydroweaver_optimize_trains`, `hydroweaver_check_constraints`). When
+`HYDROWEAVER_SIM_PYTHON` points to an environment containing `watertap`,
+`idaes-pse`, `pyomo`, and `ipopt`, `hydroweaver_simulate_train` builds real
+WaterTAP flowsheets with `WaterTAPCosting` and supports `optimizeDesign=true`
+NLP solving.
 
-Backend discovery only proves that the adapter and Python interpreter can run.
-OpenAqua keeps processed data on Hugging Face, not in its Git repository.
-Download/unzip `data.zip`, then build indexes.
+### Are designs ready for direct plant construction?
 
-### Can HydroWeaver download the dataset automatically?
-
-Not currently. Dataset acquisition is explicit so users can choose the storage
-location and preserve a known snapshot. Follow the commands in
-[Quick start](./QUICKSTART.md).
-
-### What does `hydroweaver_ingest_knowledge` do?
-
-It mirrors OpenAqua v1’s `/ingest` behavior by writing a JSON record under
-`water_treatment_agent/data/ingest`. The stock `IndexBuilder` reads canonical
-TDB and case files and does not automatically merge staged records. Treat the
-staged file as a curation input, not proof that retrieval now uses it.
-
-### Are recommendations safe to implement directly?
-
-No. They are early-stage decision support. Taxonomy and rule checks do not
-establish removal performance, hydraulics, residuals management, chemical
-compatibility, cost, reliability, regulatory compliance, or local
-constructability. Use expert review and site-specific testing/design.
-
-### What does the closed-loop optimizer change?
-
-`hydroweaver_optimize_trains` (or `hydroweaver optimize`) applies the constraint
-critic to candidate trains, keeps the critic's auto-revisions, and regenerates
-candidates through the planner with a structured revision directive whenever a
-round stops making progress. It returns per-round constraint reports, unresolved
-violations, and the feasible trains, and it stops at `feasible`, `stalled`, or
-`budget_exhausted` — the record always says which. `feasible` means every chain
-passed the machine-readable constraint checks; it is not a performance, sizing,
-or compliance claim.
-
-### What does WContBench measure?
-The included evaluation scripts compare predicted treatment units or retrieved
-evidence to benchmark references. They measure benchmark agreement, not actual
-finished-water performance or regulatory compliance.
+No. Simulation feasibility within HydroWeaver’s mechanistic models verifies
+declared numerical constraints for early-stage engineering screening and
+benchmarking only. Real deployment requires expert engineering review,
+treatability/pilot testing, and regulatory compliance verification.
 
 ### Where are jobs and outputs stored?
 
-Job records default to `<workdir>/hydroweaver-jobs/`. Result JSON files default to
-`<workdir>/hydroweaver-output/` unless a tool receives an explicit `output` path.
-Use `hydroweaver_job_list`, `hydroweaver_job_manifest`, and
-`hydroweaver_job_artifacts` to recover them.
+By default under `<workdir>/hydroweaver-jobs/` and `<workdir>/hydroweaver-output/`.
+Inspect them with `hydroweaver_job_list`, `hydroweaver_job_manifest`, and
+`hydroweaver_job_artifacts`.
 
-### Is OAuth required for HydroWeaver agent?
+### Does HydroWeaver require an API login or OAuth?
 
-No. Provider setup is API-key based. Environment-variable credentials are
-recommended over `--api-key`, which writes plaintext to configuration and may
-remain in shell history.
+No. Offline optimization (`hydroweaver optimize`, `hydroweaver gym`) needs no
+LLM key at all. Interactive chat surfaces (`hydroweaver`, `chat`, `web`) use
+standard API-key providers configured via `hydroweaver onboard` or `/provider`.
 
-### Which interfaces have the same capabilities?
+### How do I report issues?
 
-TUI, CLI/REPL, Web, and desktop use the same HydroWeaver and MCP tools. The choice
-is mainly interaction style: terminal for scriptability, Web/desktop for longer
-reading and session browsing.
-
-### How is HydroWeaver related to Kimi Code?
-
-It vendors the MIT-licensed Kimi Code engine but is an independent product. The
-HydroWeaver-specific layer lives under `engine/apps/hydroweaver`; directly
-running the upstream Kimi Code client keeps its native identity and behavior.
-
-### How do I report an issue?
-
-Open <https://github.com/zhaorui-bi/HydroWeaver/issues> and include a
-redacted `hydroweaver doctor --json` report, OS, Node/Python versions, OpenAqua
-commit, and a minimal reproduction. Use the private channel in
-[SECURITY.md](../SECURITY.md) for vulnerabilities.
+Open an issue at <https://github.com/zhaorui-bi/HydroWeaver/issues> with
+redacted `hydroweaver doctor --json`, OS/Node/Python versions, and a minimal
+reproduction case. See [SECURITY.md](../SECURITY.md) for vulnerabilities.

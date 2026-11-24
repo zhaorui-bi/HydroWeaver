@@ -581,7 +581,7 @@ if (operation === 'health') {
   if (mode.healthPause) { writeFileSync(path.join(root, 'health-paused'), 'ready'); await delay(350); }
   console.log(JSON.stringify({ ok: mode.healthy !== false, ready_for_recommendation: mode.healthy !== false })); process.exit(0);
 }
-if (operation === 'identity') { console.log(JSON.stringify({ backend_revision: mode.identity || 'fixture-revision', models: { openrouter_configured: false }, retrieval: {}, planning: {} })); process.exit(0); }
+if (operation === 'identity') { console.log(JSON.stringify({ backend_revision: mode.identity || 'fixture-revision', optimization: { joint_config_and_params: true }, gym: { benchmark: 'AquaDesignGym', tasks: 12 }, retrieval: {}, planning: {} })); process.exit(0); }
 appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify({ operation }) + '\n');
 if (mode.delayStage === operation) await delay(mode.delayMs || 100);
 const failure = path.join(root, 'already-failed');

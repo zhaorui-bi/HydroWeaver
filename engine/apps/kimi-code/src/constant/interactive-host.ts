@@ -39,7 +39,7 @@ const KIMI_CODE_BRAND: InteractiveHostBrand = {
   hiddenCommands: [],
 };
 
-function openAquaVersion(env: NodeJS.ProcessEnv): string | undefined {
+function hydroWeaverVersion(env: NodeJS.ProcessEnv): string | undefined {
   const value = env['HYDROWEAVER_VERSION']?.trim();
   if (value === undefined || value.length === 0 || value.length > 64) return undefined;
   return /^[0-9A-Za-z.+-]+$/.test(value) ? value : undefined;
@@ -55,19 +55,19 @@ export function resolveInteractiveHostBrand(
     assistantName: 'HydroWeaver',
     commandName: 'hydroweaver',
     processName: 'hydroweaver',
-    logo: ['<~AQUA~>', ' WEAVER'],
+    logo: ['<HYDRO>', ' WEAVER'],
     welcomeArt: [
-      '   ____                   ___',
-      '  / __ \\____  ___  ____  /   | ____ ___  ______ _',
-      ' / / / / __ \\/ _ \\/ __ \\/ /| |/ __ `/ / / / __ `/',
-      '/ /_/ / /_/ /  __/ / / / ___ / /_/ / /_/ / /_/ /',
-      '\\____/ .___/\\___/_/ /_/_/  |_\\__, /\\__,_/\\__,_/',
-      '    /_/                       /_/',
+      '  _   _           _         __        __',
+      ' | | | |_   _  __| |_ __ __\\ \\      / /__  __ ___   _____ _ __',
+      ' | |_| | | | |/ _` | \'__/ _ \\ \\ /\\ / / _ \\/ _` \\ \\ / / _ \\ \'__|',
+      ' |  _  | |_| | (_| | | | (_) \\ V  V /  __/ (_| |\\ V /  __/ |',
+      ' |_| |_|\\__, |\\__,_|_|  \\___/ \\_/\\_/ \\___|\\__,_| \\_/ \\___|_|',
+      '        |___/',
       '       <====[ H Y D R O W E A V E R ]====>',
     ],
     welcomeTagline: 'FROM PLAUSIBLE TO FEASIBLE',
     welcomeDescription: 'Closed-loop optimization for water-treatment train design',
-    welcomeSpecialties: 'PARSE  ::  RETRIEVE  ::  PLAN  ::  CRITIQUE  ::  OPTIMIZE',
+    welcomeSpecialties: 'GENERATE  ::  OPTIMIZE  ::  SIMULATE  ::  REVISE',
     transcriptMarker: '› ',
     promptSymbol: '›',
     promptLabel: 'WATER QUERY',
@@ -80,7 +80,7 @@ export function resolveInteractiveHostBrand(
       platform: 'hydroweaver',
       uiMode: 'hydroweaver',
     },
-    version: openAquaVersion(env),
+    version: hydroWeaverVersion(env),
   };
 }
 

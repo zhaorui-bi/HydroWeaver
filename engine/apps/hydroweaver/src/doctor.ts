@@ -3,7 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { ASCII_LOGO } from './banner';
-import { createOpenAquaHarness, resolveOpenAquaHome } from './harness';
+import { createHydroWeaverHarness, resolveHydroWeaverHome } from './harness';
 import { resolveMcpLaunch } from './mcp/register';
 import { defaultWebAssetsDir, packageVersion, resolveUserPath, skillsDir } from './paths';
 import { validateProviderBaseUrl } from './providers';
@@ -17,7 +17,7 @@ import {
   backendRecommendationReady,
   describeBackend,
   probeBackend,
-  resolveOpenAquaBackend,
+  resolveHydroWeaverBackend,
   summarizeBackendHealth,
 } from './hydroweaver/backend';
 
@@ -41,7 +41,7 @@ export interface DoctorOptions {
 }
 
 export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
-  const homeDir = resolveUserPath(options.homeDir ?? resolveOpenAquaHome());
+  const homeDir = resolveUserPath(options.homeDir ?? resolveHydroWeaverHome());
   const checks: DoctorCheck[] = [];
 
   const nodeOk = nodeVersionAtLeast(24, 15);
@@ -91,7 +91,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   let configWarnings: readonly string[] = [];
   const providerTransportIssues: string[] = [];
   if (homeExists) {
-    const harness = createOpenAquaHarness(homeDir);
+    const harness = createHydroWeaverHarness(homeDir);
     try {
       const [config, diagnostics] = await Promise.all([
         harness.getConfig(),
@@ -138,7 +138,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   let backendDetail = 'not found';
   let backendOk = false;
   try {
-    const backend = resolveOpenAquaBackend(process.env, homeDir);
+    const backend = resolveHydroWeaverBackend(process.env, homeDir);
     backendDetail = describeBackend(backend);
     backendOk = backend !== undefined;
     if (backend !== undefined && options.probe === true) {
@@ -159,7 +159,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     ok: backendOk,
     detail:
       backendDetail === 'not found'
-        ? 'not found (set HYDROWEAVER_COMMAND / HYDROWEAVER_REPO, or install `hydroweaver` on PATH)'
+        ? 'not found (set HYDROWEAVER_COMMAND or HYDROWEAVER_PYTHON, or run `hydroweaver onboard`)'
         : backendDetail,
     required: true,
   });

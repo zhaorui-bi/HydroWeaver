@@ -31,33 +31,27 @@
       insertFailed: 'Could not add the scenario. Please enter it in the composer manually.',
       cite: {
         label: 'How to cite',
-        short: 'Liu H. et al. (2027). OpenAqua. Water Research 308, 126761.',
-        doiLabel: 'doi:10.1016/j.watres.2026.126761',
-        doiUrl: 'https://doi.org/10.1016/j.watres.2026.126761',
-        docsLabel: 'About the science',
+        short: 'HydroWeaver: Agentic Closed-Loop Water Treatment Train Design & AquaDesignGym.',
+        doiLabel: 'GitHub Repository',
+        doiUrl: 'https://github.com/zhaorui-bi/HydroWeaver',
+        docsLabel: 'Architecture & AquaDesignGym',
         docsUrl:
-          'https://github.com/zhaorui-bi/HydroWeaver/blob/main/docs/OPENAQUA.md',
+          'https://github.com/zhaorui-bi/HydroWeaver/blob/main/docs/ARCHITECTURE.md',
         copy: 'Copy citation',
         copied: 'Copied ✓',
         copyFailed: 'Could not copy. Select the text below and copy it manually.',
         plain:
-          'Liu H., Jiang Z., Zhong H., Li J., Pang W., Yuan Y. (2027). OpenAqua: An ' +
-          'automated multi-agent framework for early-stage water treatment train design ' +
-          'with retrieval augmentation and critic-based refinement. Water Research 308, ' +
-          '126761. https://doi.org/10.1016/j.watres.2026.126761',
+          'HydroWeaver: From Plausible to Feasible Water Treatment Train Designs through Agentic ' +
+          'Closed-Loop Optimization (with AquaDesignGym benchmark and WaterTAP simulation integration). ' +
+          'https://github.com/zhaorui-bi/HydroWeaver',
         bibtex:
-          '@article{liu2027openaqua,\n' +
-          '  title = {OpenAqua: An automated multi-agent framework for early-stage water ' +
-          'treatment train design with retrieval augmentation and critic-based ' +
-          'refinement},\n' +
-          '  author = {Liu, Hanzhang and Jiang, Zhaorui and Zhong, Huiling and Li, ' +
-          'Jinshuo and Pang, Wei and Yuan, Yingfang},\n' +
-          '  journal = {Water Research},\n' +
-          '  volume = {308},\n' +
-          '  pages = {126761},\n' +
-          '  year = {2027},\n' +
-          '  doi = {10.1016/j.watres.2026.126761},\n' +
-          '  url = {https://doi.org/10.1016/j.watres.2026.126761}\n' +
+          '@software{hydroweaver2026,\n' +
+          '  title = {HydroWeaver: From Plausible to Feasible Water Treatment Train Designs ' +
+          'through Agentic Closed-Loop Optimization},\n' +
+          '  author = {{HydroWeaver Contributors}},\n' +
+          '  year = {2026},\n' +
+          '  version = {0.3.0-beta.1},\n' +
+          '  url = {https://github.com/zhaorui-bi/HydroWeaver}\n' +
           '}',
       },
       starters: [
@@ -101,33 +95,27 @@
       insertFailed: '无法添加场景，请手动输入到编辑框。',
       cite: {
         label: '如何引用',
-        short: 'Liu H. 等（2027）. OpenAqua. Water Research 308, 126761.',
-        doiLabel: 'doi:10.1016/j.watres.2026.126761',
-        doiUrl: 'https://doi.org/10.1016/j.watres.2026.126761',
-        docsLabel: '了解 OpenAqua 原理',
+        short: 'HydroWeaver：面向可行水处理工艺路线设计的智能体闭环优化与 AquaDesignGym。',
+        doiLabel: 'GitHub 仓库',
+        doiUrl: 'https://github.com/zhaorui-bi/HydroWeaver',
+        docsLabel: '系统架构与 AquaDesignGym',
         docsUrl:
-          'https://github.com/zhaorui-bi/HydroWeaver/blob/main/docs/OPENAQUA.md',
+          'https://github.com/zhaorui-bi/HydroWeaver/blob/main/docs/ARCHITECTURE.md',
         copy: '复制引用',
         copied: '已复制 ✓',
         copyFailed: '复制失败，请选中下方文字手动复制。',
         plain:
-          'Liu H., Jiang Z., Zhong H., Li J., Pang W., Yuan Y. (2027). OpenAqua: An ' +
-          'automated multi-agent framework for early-stage water treatment train design ' +
-          'with retrieval augmentation and critic-based refinement. Water Research 308, ' +
-          '126761. https://doi.org/10.1016/j.watres.2026.126761',
+          'HydroWeaver: From Plausible to Feasible Water Treatment Train Designs through Agentic ' +
+          'Closed-Loop Optimization (with AquaDesignGym benchmark and WaterTAP simulation integration). ' +
+          'https://github.com/zhaorui-bi/HydroWeaver',
         bibtex:
-          '@article{liu2027openaqua,\n' +
-          '  title = {OpenAqua: An automated multi-agent framework for early-stage water ' +
-          'treatment train design with retrieval augmentation and critic-based ' +
-          'refinement},\n' +
-          '  author = {Liu, Hanzhang and Jiang, Zhaorui and Zhong, Huiling and Li, ' +
-          'Jinshuo and Pang, Wei and Yuan, Yingfang},\n' +
-          '  journal = {Water Research},\n' +
-          '  volume = {308},\n' +
-          '  pages = {126761},\n' +
-          '  year = {2027},\n' +
-          '  doi = {10.1016/j.watres.2026.126761},\n' +
-          '  url = {https://doi.org/10.1016/j.watres.2026.126761}\n' +
+          '@software{hydroweaver2026,\n' +
+          '  title = {HydroWeaver: From Plausible to Feasible Water Treatment Train Designs ' +
+          'through Agentic Closed-Loop Optimization},\n' +
+          '  author = {{HydroWeaver Contributors}},\n' +
+          '  year = {2026},\n' +
+          '  version = {0.3.0-beta.1},\n' +
+          '  url = {https://github.com/zhaorui-bi/HydroWeaver}\n' +
           '}',
       },
       starters: [

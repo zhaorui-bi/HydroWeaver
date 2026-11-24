@@ -17,7 +17,7 @@ export function resolveUserPath(value: string): string {
   return path.resolve(trimmed);
 }
 
-export function resolveOpenAquaHome(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveHydroWeaverHome(env: NodeJS.ProcessEnv = process.env): string {
   const explicit = env['HYDROWEAVER_HOME']?.trim();
   return explicit === undefined || explicit === ''
     ? path.join(homedir(), '.hydroweaver')

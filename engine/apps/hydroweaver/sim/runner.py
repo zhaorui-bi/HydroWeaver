@@ -1,13 +1,14 @@
-"""WaterTAP / IDAES simulation backend for HydroWeaver.
+"""WaterTAP / IDAES simulation and Pyomo+IPOPT NLP optimization backend for HydroWeaver.
 
 Runs as an isolated subprocess with a dedicated Python interpreter that has
-WaterTAP installed; it never imports WaterTAP into the OpenAqua adapter
-process. Speaks the same JSON-in / JSON-out contract as the adapter and is
+WaterTAP installed; it never imports WaterTAP into the main HydroWeaver process.
+Speaks the same JSON-in / JSON-out contract as the HydroWeaver engine and is
 documented in docs/SIMULATION.md.
 
 Commands:
-    self-check   report package versions, solver availability, supported units
-    simulate     build, solve, and report a candidate treatment train
+    self-check       report package versions, solver availability, supported units
+    simulate         build, solve, and cost a candidate treatment train
+    optimize-design  solve a Pyomo+IPOPT NLP to minimize LCOW over operating variables
 """
 
 from __future__ import annotations
@@ -218,18 +219,25 @@ MEMBRANE_PRESSURE_DROP_PA = 3e5  # nominal retentate pressure drop [Pa]
 AREA_GUESS_PER_KG_S = 50.0  # initialization area guess scaled with feed flow
 PUMP_EFFICIENCY = 0.80
 
-def build_and_solve(modeled: list[str], specs, payload: dict[str, Any]) -> dict[str, Any]:
-    """Build the WaterTAP flowsheet, solve it, and collect results.
+def build_and_solve(
+    modeled: list[str],
+    specs,
+    payload: dict[str, Any],
+    *,
+    optimize_design: bool = False,
+) -> dict[str, Any]:
+    """Build the WaterTAP flowsheet, attach costing, solve (or NLP-optimize), and collect results.
 
     Follows the WaterTAP steady-state membrane example recipe: an IDAES Feed
     boundary, the declared unit chain joined by arcs, explicit fixations derived
-    only from the declared case or explicit options, property and unit scaling,
-    per-unit initialization, and one IPOPT solve. Any deviation raises
-    FlowsheetError so the caller reports a build failure instead of a silent
-    wrong answer.
+    only from the declared case or explicit options, optional WaterTAPCosting
+    attachment, property and unit scaling, per-unit initialization, and an IPOPT
+    solve. When ``optimize_design=True``, unfixes pump discharge pressure,
+    membrane area, and recovery within bounds and minimizes LCOW subject to
+    permeate TDS limits.
     """
     try:
-        from pyomo.environ import ConcreteModel, TransformationFactory, value
+        from pyomo.environ import ConcreteModel, Objective, TransformationFactory, value
         from pyomo.network import Arc
         from idaes.core import FlowsheetBlock
         from watertap.core.solvers import get_solver
@@ -239,6 +247,18 @@ def build_and_solve(modeled: list[str], specs, payload: dict[str, Any]) -> dict[
         from watertap.property_models.NaCl_prop_pack import NaClParameterBlock
     except Exception as error:
         raise FlowsheetError(f'simulation backend import failed: {type(error).__name__}: {error}') from error
+
+    costing_cls = None
+    unit_costing_cls = None
+    try:
+        from idaes.core import UnitModelCostingBlock
+        from watertap.costing import WaterTAPCosting
+
+        costing_cls = WaterTAPCosting
+        unit_costing_cls = UnitModelCostingBlock
+    except Exception:
+        costing_cls = None
+        unit_costing_cls = None
 
     salinity, salinity_source = feed_salinity_g_l(payload)
     flow, flow_source = design_flow_m3_day(payload)
@@ -253,12 +273,17 @@ def build_and_solve(modeled: list[str], specs, payload: dict[str, Any]) -> dict[
     # that explicit per-variable factors do not reach.
     model.fs.properties.set_default_scaling('flow_mass_phase_comp', 1.0, index=('Liq', 'H2O'))
     model.fs.properties.set_default_scaling('flow_mass_phase_comp', 1e2, index=('Liq', 'NaCl'))
+    if costing_cls is not None:
+        model.fs.costing = costing_cls()
     model.fs.feed = Feed(property_package=model.fs.properties)
 
     blocks: list[tuple[str, object, object]] = []
     try:
         for index, (name, spec) in enumerate(zip(modeled, specs)):
-            blocks.append((name, spec, _add_unit(model.fs, name, spec, index)))
+            block = _add_unit(model.fs, name, spec, index)
+            if costing_cls is not None and unit_costing_cls is not None:
+                block.costing = unit_costing_cls(flowsheet_costing_block=model.fs.costing)
+            blocks.append((name, spec, block))
         for index in range(len(blocks)):
             source = model.fs.feed if index == 0 else blocks[index - 1][2]
             destination = blocks[index][2]
@@ -269,6 +294,13 @@ def build_and_solve(modeled: list[str], specs, payload: dict[str, Any]) -> dict[
         _fix_feed(model, feed_mass_flow, salt_mass_fraction)
         for name, spec, block in blocks:
             _apply_fixations(name, spec, block, feed_mass_flow)
+        membranes_all = [(name, block) for name, spec, block in blocks if spec.kind == 'membrane']
+        if costing_cls is not None and membranes_all:
+            model.fs.costing.cost_process()
+            last_membrane = membranes_all[-1][1]
+            model.fs.costing.add_annual_water_production(last_membrane.mixed_permeate[0].flow_vol)
+            model.fs.costing.add_LCOW(last_membrane.mixed_permeate[0].flow_vol)
+            model.fs.costing.add_specific_energy_consumption(last_membrane.mixed_permeate[0].flow_vol)
         _apply_scaling(model, blocks)
 
         solver = get_solver()
@@ -292,24 +324,53 @@ def build_and_solve(modeled: list[str], specs, payload: dict[str, Any]) -> dict[
         membranes = [(index, name, spec, block) for index, (name, spec, block) in enumerate(blocks) if spec.kind == 'membrane']
         for position, (index, name, spec, block) in enumerate(membranes):
             if position == 0:
-                # The first membrane is seeded from the declared feed state at
-                # the operating pressure; later membranes inherit the previous
-                # membrane's inlet element as the closest available state.
                 _seed_membrane_state(block, model.fs.feed.properties[0], operating_pressure)
             else:
                 previous = membranes[position - 1][3]
                 _seed_membrane_state(block, previous.feed_side.properties[0, 0])
         _initialize(model, blocks, target_recovery, solver)
+        if costing_cls is not None and membranes_all:
+            model.fs.costing.initialize()
         for name, spec, block in blocks:
             if spec.kind == 'membrane':
                 block.area.unfix()
                 block.recovery_mass_phase_comp[0, 'Liq', 'H2O'].fix(target_recovery)
-        degrees = degrees_of_freedom(model)
-        if degrees != 0:
-            raise FlowsheetError(
-                f'flowsheet has {degrees} degree(s) of freedom after fixation; '
-                'the declared case does not determine a unique steady state'
-            )
+
+        if optimize_design:
+            from pyomo.environ import minimize
+
+            options = payload.get('options') if isinstance(payload.get('options'), dict) else {}
+            case = payload.get('case') if isinstance(payload.get('case'), dict) else {}
+            targets = case.get('treatment_targets') if isinstance(case.get('treatment_targets'), dict) else {}
+            max_tds_g_l = options.get('max_permeate_tds_g_L')
+            if max_tds_g_l is None and isinstance(targets.get('tds_mg_L'), (int, float)):
+                max_tds_g_l = float(targets['tds_mg_L']) / 1000.0
+            min_rec = float(options.get('min_recovery') or 0.35)
+            max_rec = float(options.get('max_recovery') or 0.85)
+            for name, spec, block in blocks:
+                if spec.kind == 'pump':
+                    block.control_volume.properties_out[0].pressure.unfix()
+                    block.control_volume.properties_out[0].pressure.setlb(3.5e5)
+                    block.control_volume.properties_out[0].pressure.setub(82e5)
+                elif spec.kind == 'membrane':
+                    block.recovery_mass_phase_comp[0, 'Liq', 'H2O'].unfix()
+                    block.recovery_mass_phase_comp[0, 'Liq', 'H2O'].setlb(min_rec)
+                    block.recovery_mass_phase_comp[0, 'Liq', 'H2O'].setub(max_rec)
+                    block.area.setlb(5.0)
+                    block.area.setub(10_000.0)
+                    if max_tds_g_l is not None and float(max_tds_g_l) > 0:
+                        block.mixed_permeate[0].conc_mass_phase_comp['Liq', 'NaCl'].setub(float(max_tds_g_l))
+            if costing_cls is not None and membranes_all:
+                model.fs.opt_objective = Objective(expr=model.fs.costing.LCOW, sense=minimize)
+            elif membranes_all:
+                model.fs.opt_objective = Objective(expr=sum(b.area for _, b in membranes_all), sense=minimize)
+        else:
+            degrees = degrees_of_freedom(model)
+            if degrees != 0:
+                raise FlowsheetError(
+                    f'flowsheet has {degrees} degree(s) of freedom after fixation; '
+                    'the declared case does not determine a unique steady state'
+                )
         results = solver.solve(model, tee=False)
     except Exception as error:
         raise FlowsheetError(f'flowsheet build or solve failed: {type(error).__name__}: {error}') from error
@@ -317,20 +378,33 @@ def build_and_solve(modeled: list[str], specs, payload: dict[str, Any]) -> dict[
     termination = str(results.solver.termination_condition)
     solver_status = str(results.solver.status)
     converged = 'optimal' in termination.lower()
+    flowsheet_out = _flowsheet_results(model, blocks, converged, value, feed_mass_flow)
+    if converged and costing_cls is not None and hasattr(model.fs, 'costing'):
+        try:
+            flowsheet_out['capex_usd'] = round(float(value(model.fs.costing.total_capital_cost)), 2)
+            flowsheet_out['opex_usd_yr'] = round(float(value(model.fs.costing.total_operating_cost)), 2)
+            if hasattr(model.fs.costing, 'LCOW'):
+                flowsheet_out['lcow_usd_m3'] = round(float(value(model.fs.costing.LCOW)), 4)
+            if hasattr(model.fs.costing, 'specific_energy_consumption'):
+                flowsheet_out['watertap_sec_kWh_m3'] = round(float(value(model.fs.costing.specific_energy_consumption)), 4)
+        except Exception:
+            pass
     return {
         'status': 'optimal' if converged else 'unconverged',
+        'mode': 'nlp-design-optimization' if optimize_design else 'steady-state-simulation',
         'units': [
             {'unit': name, 'model': spec.model, 'results': _unit_results(name, spec, block, converged, value)}
             for name, spec, block in blocks
         ],
-        'flowsheet': _flowsheet_results(model, blocks, converged, value, feed_mass_flow),
+        'flowsheet': flowsheet_out,
         'solver': {
             'name': 'ipopt',
             'status': solver_status,
             'termination_condition': termination,
             'iterations': _solver_iterations(results),
             'message': str(getattr(results.solver, 'message', '') or ''),
-        },        'basis': {
+        },
+        'basis': {
             'feed_salinity_g_L': salinity,
             'feed_salinity_source': salinity_source,
             'feed_mass_flow_kg_s': feed_mass_flow,
@@ -578,7 +652,7 @@ def _flowsheet_results(model, blocks, converged, value, feed_mass_flow) -> dict[
     return totals
 
 
-def simulate(payload: dict[str, Any]) -> dict[str, Any]:
+def simulate(payload: dict[str, Any], *, optimize_design: bool = False) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError('simulation input must be a JSON object')
     if payload.get('schema_version') != SCHEMA_VERSION:
@@ -599,7 +673,7 @@ def simulate(payload: dict[str, Any]) -> dict[str, Any]:
         'coverage': {
             'modeled': coverage['modeled'],
             'unsupported': coverage['unsupported'],
-            'note': 'Unsupported units are excluded from the flowsheet and flagged.',
+            'note': 'Unsupported units are excluded from the WaterTAP flowsheet and modeled by HydroWeaver process physics.',
         },
         'train': {'chain_id': str(train.get('chain_id') or 'train'), 'chain': [str(unit) for unit in chain]},
         'environment': {'versions': environment['versions'], 'python': environment['python']},
@@ -608,7 +682,7 @@ def simulate(payload: dict[str, Any]) -> dict[str, Any]:
 
     if not coverage['modeled']:
         record['status'] = 'unsupported'
-        record['solver'] = {'name': 'ipopt', 'status': 'not_run', 'termination_condition': '', 'iterations': 0, 'message': 'no unit in the train maps to a mechanistic model'}
+        record['solver'] = {'name': 'ipopt', 'status': 'not_run', 'termination_condition': '', 'iterations': 0, 'message': 'no unit in the train maps to a WaterTAP unit model'}
         return record
 
     if not environment['available']:
@@ -617,7 +691,7 @@ def simulate(payload: dict[str, Any]) -> dict[str, Any]:
         return record
 
     try:
-        outcome = build_and_solve(coverage['modeled'], coverage['specs'], payload)
+        outcome = build_and_solve(coverage['modeled'], coverage['specs'], payload, optimize_design=optimize_design)
     except FlowsheetError as error:
         record['status'] = 'error'
         record['error'] = str(error)
@@ -628,7 +702,7 @@ def simulate(payload: dict[str, Any]) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='HydroWeaver simulation runner (WaterTAP/IDAES/Pyomo/IPOPT)')
-    parser.add_argument('command', choices=('self-check', 'simulate'))
+    parser.add_argument('command', choices=('self-check', 'simulate', 'optimize-design'))
     parser.add_argument('--input', dest='input')
     parser.add_argument('--output', dest='output')
     return parser
@@ -640,8 +714,8 @@ def main() -> int:
         payload = self_check()
     else:
         if not args.input or not args.output:
-            raise ValueError('simulate requires --input and --output')
-        payload = simulate(load_json(args.input))
+            raise ValueError(f'{args.command} requires --input and --output')
+        payload = simulate(load_json(args.input), optimize_design=(args.command == 'optimize-design'))
     if args.output:
         write_json(payload, args.output)
     else:

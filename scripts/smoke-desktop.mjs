@@ -48,11 +48,13 @@ try {
     'harness/skills/hydroweaver/SKILL.md',
     'harness/skills/hydroweaver-campaign/SKILL.md',
     'harness/backend/hydroweaver_cli.py',
+    'harness/hydroweaver_py/harness.py',
+    'harness/aquadesigngym/env.py',
+    'harness/sim/runner.py',
     'web-ui/index.html',
     'web-ui/favicon.ico',
     'licenses/HYDROWEAVER_LICENSE',
     'licenses/KIMI_CODE_LICENSE',
-    'licenses/OPENAQUA_UPSTREAM_LICENSE',
     'licenses/THIRD_PARTY_NOTICES.md',
     'licenses/SBOM.spdx.json',
     'licenses/ELECTRON_LICENSE',
@@ -62,6 +64,9 @@ try {
   }
   assertPackagedVersions(resources, productVersion);
   assertNoPythonCache(path.join(resources, 'harness/backend'));
+  assertNoPythonCache(path.join(resources, 'harness/hydroweaver_py'));
+  assertNoPythonCache(path.join(resources, 'harness/aquadesigngym'));
+  assertNoPythonCache(path.join(resources, 'harness/sim'));
   assertSameFile(
     path.join(root, 'build/icon.ico'),
     path.join(resources, 'web-ui/favicon.ico'),

@@ -8,13 +8,13 @@ import {
 } from '@moonshot-ai/kimi-code-sdk';
 
 import { MCP_SERVER_NAME, mcpEnvironment, resolveMcpLaunch } from './mcp/register';
-import { packageVersion, resolveOpenAquaHome, resolveUserPath, skillsDir } from './paths';
+import { packageVersion, resolveHydroWeaverHome, resolveUserPath, skillsDir } from './paths';
 
-export { resolveOpenAquaHome } from './paths';
+export { resolveHydroWeaverHome } from './paths';
 
 export const PRODUCT_NAME = 'hydroweaver';
 
-export function createOpenAquaHarness(homeDir: string = resolveOpenAquaHome()): KimiHarness {
+export function createHydroWeaverHarness(homeDir: string = resolveHydroWeaverHome()): KimiHarness {
   return createKimiHarness({
     homeDir,
     identity: {
@@ -36,7 +36,7 @@ export async function createDefaultSession(harness: KimiHarness): Promise<Sessio
   return harness.createSession({ workDir, model, permission: 'auto' });
 }
 
-export async function attachOpenAquaTools(session: Session, homeDir: string): Promise<void> {
+export async function attachHydroWeaverTools(session: Session, homeDir: string): Promise<void> {
   const launch = resolveMcpLaunch();
   await session.addMcpServer(
     {
@@ -50,7 +50,7 @@ export async function attachOpenAquaTools(session: Session, homeDir: string): Pr
   );
 }
 
-export async function ensureOpenAquaSkillDirs(harness: KimiHarness): Promise<void> {
+export async function ensureHydroWeaverSkillDirs(harness: KimiHarness): Promise<void> {
   const dir = skillsDir();
   const config = await harness.getConfig();
   const current = config.extraSkillDirs ?? [];

@@ -14,6 +14,11 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const RESEARCH_ACTIONS = ['create', 'status', 'list', 'advance', 'respond', 'cancel'] as const;
 export type ResearchAction = (typeof RESEARCH_ACTIONS)[number];
 
+export const GYM_ACTIONS = ['tasks', 'eval'] as const;
+export type GymAction = (typeof GYM_ACTIONS)[number];
+export const GYM_PERTURBATIONS = ['nominal', 'mild_shift', 'severe_shift'] as const;
+export type GymPerturbation = (typeof GYM_PERTURBATIONS)[number];
+
 export type CliInvocation =
   | { readonly kind: 'tui' }
   | { readonly kind: 'help' }
@@ -38,7 +43,7 @@ export type CliInvocation =
       readonly yes: boolean;
       readonly homeDir?: string;
       readonly hydroweaverCommand?: string;
-      readonly hydroweaverRepo?: string;
+      readonly hydroweaverPython?: string;
       readonly importFrom?: string;
       readonly provider?: string;
       readonly apiKey?: string;
@@ -62,6 +67,18 @@ export type CliInvocation =
       readonly inputFile: string;
       readonly topK?: number;
       readonly maxRounds?: number;
+      readonly maxSimCalls?: number;
+      readonly wait: boolean;
+      readonly homeDir?: string;
+    }
+  | {
+      readonly kind: 'gym';
+      readonly action: GymAction;
+      readonly methods?: readonly string[];
+      readonly tasks?: readonly string[];
+      readonly perturbations?: readonly GymPerturbation[];
+      readonly maxSimCalls?: number;
+      readonly seed?: number;
       readonly wait: boolean;
       readonly homeDir?: string;
     };
@@ -145,7 +162,7 @@ export function parseCliInvocation(argv: readonly string[]): CliInvocation {
         yes: { type: 'boolean' },
         home: { type: 'string' },
         'hydroweaver-command': { type: 'string' },
-        'hydroweaver-repo': { type: 'string' },
+        'hydroweaver-python': { type: 'string' },
         'import-from': { type: 'string' },
         provider: { type: 'string' },
         'api-key': { type: 'string' },
@@ -160,9 +177,9 @@ export function parseCliInvocation(argv: readonly string[]): CliInvocation {
       }
       if (
         parsed.values['hydroweaver-command'] !== undefined &&
-        parsed.values['hydroweaver-repo'] !== undefined
+        parsed.values['hydroweaver-python'] !== undefined
       ) {
-        throw new CliArgumentError('--hydroweaver-command and --hydroweaver-repo cannot be used together');
+        throw new CliArgumentError('--hydroweaver-command and --hydroweaver-python cannot be used together');
       }
       return {
         kind: 'onboard',
@@ -172,7 +189,10 @@ export function parseCliInvocation(argv: readonly string[]): CliInvocation {
           parsed.values['hydroweaver-command'],
           '--hydroweaver-command',
         ),
-        hydroweaverRepo: optionalNonEmptyString(parsed.values['hydroweaver-repo'], '--hydroweaver-repo'),
+        hydroweaverPython: optionalNonEmptyString(
+          parsed.values['hydroweaver-python'],
+          '--hydroweaver-python',
+        ),
         importFrom: optionalNonEmptyString(parsed.values['import-from'], '--import-from'),
         provider: optionalNonEmptyString(parsed.values['provider'], '--provider'),
         apiKey: optionalNonEmptyString(parsed.values['api-key'], '--api-key'),
@@ -242,6 +262,7 @@ export function parseCliInvocation(argv: readonly string[]): CliInvocation {
         input: { type: 'string' },
         'top-k': { type: 'string' },
         'max-rounds': { type: 'string' },
+        'max-sim-calls': { type: 'string' },
         wait: { type: 'boolean' },
         home: { type: 'string' },
       });
@@ -249,12 +270,73 @@ export function parseCliInvocation(argv: readonly string[]): CliInvocation {
       const inputFile = optionalNonEmptyString(parsed.values['input'], '--input');
       if (inputFile === undefined) throw new CliArgumentError('optimize requires --input FILE');
       const topK = optionalBoundedInteger(parsed.values['top-k'], '--top-k', 1, 10);
-      const maxRounds = optionalBoundedInteger(parsed.values['max-rounds'], '--max-rounds', 1, 8);
+      const maxRounds = optionalBoundedInteger(parsed.values['max-rounds'], '--max-rounds', 1, 12);
+      const maxSimCalls = optionalBoundedInteger(parsed.values['max-sim-calls'], '--max-sim-calls', 1, 500);
       return {
         kind: 'optimize',
         inputFile,
         topK,
         maxRounds,
+        maxSimCalls,
+        wait: parsed.values['wait'] === true,
+        homeDir: optionalNonEmptyString(parsed.values['home'], '--home'),
+      };
+    }
+    case 'gym': {
+      const [action, ...actionArgs] = args;
+      if (action === '--help' || action === '-h') {
+        assertNoArguments(actionArgs, 'gym --help');
+        return { kind: 'help' };
+      }
+      if (!GYM_ACTIONS.some((value) => value === action)) {
+        throw new CliArgumentError(`gym requires an action: ${GYM_ACTIONS.join(', ')}`);
+      }
+      if (action === 'tasks') {
+        const parsed = parseCommandArgs(actionArgs, {
+          help: HELP_OPTION,
+          home: { type: 'string' },
+        });
+        if (parsed.values['help'] === true) return { kind: 'help' };
+        return {
+          kind: 'gym',
+          action: 'tasks',
+          wait: false,
+          homeDir: optionalNonEmptyString(parsed.values['home'], '--home'),
+        };
+      }
+      const parsed = parseCommandArgs(actionArgs, {
+        help: HELP_OPTION,
+        methods: { type: 'string' },
+        tasks: { type: 'string' },
+        perturbations: { type: 'string' },
+        'max-sim-calls': { type: 'string' },
+        seed: { type: 'string' },
+        wait: { type: 'boolean' },
+        home: { type: 'string' },
+      });
+      if (parsed.values['help'] === true) return { kind: 'help' };
+      const methods = optionalCsvList(parsed.values['methods'], '--methods');
+      const tasks = optionalCsvList(parsed.values['tasks'], '--tasks');
+      const perturbationsRaw = optionalCsvList(parsed.values['perturbations'], '--perturbations');
+      if (perturbationsRaw !== undefined) {
+        for (const entry of perturbationsRaw) {
+          if (!GYM_PERTURBATIONS.some((p) => p === entry)) {
+            throw new CliArgumentError(
+              `--perturbations entries must be drawn from: ${GYM_PERTURBATIONS.join(', ')}`,
+            );
+          }
+        }
+      }
+      const maxSimCalls = optionalBoundedInteger(parsed.values['max-sim-calls'], '--max-sim-calls', 5, 500);
+      const seed = optionalBoundedInteger(parsed.values['seed'], '--seed', 0, 1_000_000);
+      return {
+        kind: 'gym',
+        action: 'eval',
+        methods,
+        tasks,
+        perturbations: perturbationsRaw as readonly GymPerturbation[] | undefined,
+        maxSimCalls,
+        seed,
         wait: parsed.values['wait'] === true,
         homeDir: optionalNonEmptyString(parsed.values['home'], '--home'),
       };
@@ -310,6 +392,22 @@ function optionalNonEmptyString(
     throw new CliArgumentError(`${flag} requires a non-empty value`);
   }
   return value.trim();
+}
+
+function optionalCsvList(
+  value: string | boolean | undefined,
+  flag: string,
+): readonly string[] | undefined {
+  const raw = optionalNonEmptyString(value, flag);
+  if (raw === undefined) return undefined;
+  const items = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  if (items.length === 0) {
+    throw new CliArgumentError(`${flag} requires at least one comma-separated entry`);
+  }
+  return items;
 }
 
 function optionalPort(value: string | boolean | undefined): number | undefined {

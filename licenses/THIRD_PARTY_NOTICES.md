@@ -2,7 +2,7 @@
 
 # Third-party notices
 
-HydroWeaver bundles the open-source Kimi Code engine, OpenAqua-derived brand assets,
+HydroWeaver bundles the open-source Kimi Code engine, its standalone Python design/simulation/AquaDesignGym modules,
 its production dependency graph, Electron, and self-hosted fonts. This file records package metadata and license or notice
 texts available in the installed dependency trees at build time.
 
@@ -798,7 +798,6 @@ font assets. An entry in this inventory does not imply endorsement by its author
 | open | 8.4.2 | MIT | Sindre Sorhus | sindresorhus/open |
 | openai | 6.49.0 | Apache-2.0 | OpenAI <support@openai.com> | github:openai/openai-node |
 | openapi-types | 12.1.3 | MIT | Joseph Spencer | https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types#readme |
-| OpenAqua (external backend compatibility target and brand assets) | 0e39908 | MIT | ElijahMoulton and OpenAqua contributors | https://github.com/zhaorui-bi/OpenAqua |
 | ora | 8.2.0 | MIT | Sindre Sorhus | sindresorhus/ora |
 | outvariant | 1.4.3 | MIT | Artem Zakharchenko | https://github.com/open-draft/outvariant |
 | p-limit | 2.3.0 | MIT | Sindre Sorhus | sindresorhus/p-limit |
@@ -12603,34 +12602,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-</pre>
-
-</details>
-
-<details><summary>OpenAqua (external backend compatibility target and brand assets)@0e39908 — 35b5dc354ea6</summary>
-
-<pre>
-MIT License
-
-Copyright (c) 2026 ElijahMoulton
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 </pre>
 
 </details>

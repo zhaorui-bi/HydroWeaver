@@ -8,9 +8,9 @@ import { z } from 'zod';
 import { resolveUserPath } from '../paths';
 import {
   describeBackend,
-  resolveOpenAquaBackend,
+  resolveHydroWeaverBackend,
   runBackend,
-  type OpenAquaBackend,
+  type HydroWeaverBackend,
   type RunResult,
 } from './backend';
 import {
@@ -50,7 +50,7 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-export interface OpenAquaTool {
+export interface HydroWeaverTool {
   readonly name: string;
   readonly title: string;
   readonly description: string;
@@ -59,7 +59,7 @@ export interface OpenAquaTool {
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }
 
-export interface OpenAquaToolAnnotations {
+export interface HydroWeaverToolAnnotations {
   readonly readOnlyHint: boolean;
   readonly destructiveHint: boolean;
   readonly idempotentHint: boolean;
@@ -69,6 +69,7 @@ export interface OpenAquaToolAnnotations {
 const READ_ONLY_IDEMPOTENT = new Set([
   'hydroweaver_status',
   'hydroweaver_catalog',
+  'hydroweaver_gym_tasks',
   'hydroweaver_job_list',
   'hydroweaver_job_status',
   'hydroweaver_job_manifest',
@@ -84,12 +85,11 @@ const READ_ONLY_OPEN_WORLD = new Set([
 ]);
 const IDEMPOTENT_WRITES = new Set([
   'hydroweaver_build_indexes',
-  'hydroweaver_evaluate_trains',
-  'hydroweaver_evaluate_retrieval',
+  'hydroweaver_evaluate_gym',
   'hydroweaver_audit_report',
 ]);
 
-export function openAquaToolAnnotations(name: string): OpenAquaToolAnnotations {
+export function hydroWeaverToolAnnotations(name: string): HydroWeaverToolAnnotations {
   if (READ_ONLY_IDEMPOTENT.has(name)) {
     return { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   }
@@ -123,28 +123,27 @@ function fail(message: string, extra?: Record<string, unknown>): ToolResult {
   };
 }
 
-function backendOrError(ctx: ToolContext): OpenAquaBackend | ToolResult {
-  let backend: OpenAquaBackend | undefined;
+function backendOrError(ctx: ToolContext): HydroWeaverBackend | ToolResult {
+  let backend: HydroWeaverBackend | undefined;
   try {
-    backend = resolveOpenAquaBackend(ctx.env, ctx.homeDir);
+    backend = resolveHydroWeaverBackend(ctx.env, ctx.homeDir);
   } catch (error) {
-    return fail('OpenAqua backend configuration is invalid.', {
+    return fail('HydroWeaver backend configuration is invalid.', {
       detail: error instanceof Error ? error.message : String(error),
     });
   }
   if (backend === undefined) {
-    return fail('OpenAqua source checkout or adapter-compatible backend was not found.', {
+    return fail('HydroWeaver Python engine or Python 3.10+ interpreter was not found.', {
       how_to_fix: [
-        'Clone https://github.com/zhaorui-bi/OpenAqua and install water_treatment_agent/requirements.txt in a Python environment.',
-        'Set HYDROWEAVER_REPO to that checkout, or run `hydroweaver onboard` and accept the detected repository.',
-        'Alternatively set HYDROWEAVER_COMMAND to an adapter-compatible command as a JSON string array.',
+        'Ensure Python 3.10 or newer is available on PATH or set HYDROWEAVER_PYTHON.',
+        'Alternatively set HYDROWEAVER_COMMAND to a backend-compatible JSON string array.',
       ],
     });
   }
   return backend;
 }
 
-function isToolResult(value: OpenAquaBackend | ToolResult): value is ToolResult {
+function isToolResult(value: HydroWeaverBackend | ToolResult): value is ToolResult {
   return Array.isArray((value as ToolResult).content);
 }
 
@@ -158,34 +157,42 @@ const extraRecord = z.record(z.string().min(1).max(128), scalarExtra).optional()
 const finiteMeasurement = z.number().finite();
 const nonEmptyPath = z.string().trim().min(1).max(8_192);
 const shortText = z.string().trim().min(1).max(256);
-const queryFileSchema = nonEmptyPath.describe(`JSON file containing an OpenAqua UserQuery. ${PATH_NOTE}`);
+const queryFileSchema = nonEmptyPath.describe(`JSON file containing a HydroWeaver UserQuery. ${PATH_NOTE}`);
 
 const waterQualitySchema = z
   .object({
-    pH: finiteMeasurement.optional().describe('Measured pH, dimensionless. Preserve the reported value and investigate unusual values rather than assuming a conventional range.'),
+    pH: finiteMeasurement.optional().describe('Measured pH, dimensionless.'),
+    temperature_C: finiteMeasurement.optional().describe('Water temperature in °C.'),
+    tds_mg_L: finiteMeasurement.nonnegative().optional().describe('Total dissolved solids in mg/L.'),
     turbidity_NTU: finiteMeasurement.nonnegative().optional(),
     arsenic_ug_L: finiteMeasurement.nonnegative().optional(),
-    nitrate_mg_L: finiteMeasurement.nonnegative().optional().describe('Reported nitrate concentration in mg/L. Declare extra.nitrate_basis as "as NO3" or "as N"; do not infer the reporting basis or automatically convert it.'),
+    nitrate_mg_L: finiteMeasurement.nonnegative().optional().describe('Nitrate concentration in mg/L; declare extra.nitrate_basis as "as NO3" or "as N".'),
     fluoride_mg_L: finiteMeasurement.nonnegative().optional(),
     toc_mg_L: finiteMeasurement.nonnegative().optional(),
     iron_mg_L: finiteMeasurement.nonnegative().optional(),
-    hardness_mg_L: finiteMeasurement.nonnegative().optional().describe('Reported hardness in mg/L. Declare extra.hardness_basis as "as CaCO3" when applicable; do not infer the reporting basis or automatically convert it.'),
+    hardness_mg_L: finiteMeasurement.nonnegative().optional().describe('Hardness in mg/L; declare extra.hardness_basis as "as CaCO3".'),
     e_coli_CFU_100mL: finiteMeasurement.nonnegative().optional(),
     lead_ug_L: finiteMeasurement.nonnegative().optional(),
-    extra: extraRecord.describe('Additional source-water measurements and reporting metadata. Use nitrate_basis ("as NO3" or "as N") and hardness_basis ("as CaCO3"); include units in other measurement keys. Unknown values must remain absent.'),
+    boron_mg_L: finiteMeasurement.nonnegative().optional(),
+    silica_mg_L: finiteMeasurement.nonnegative().optional(),
+    extra: extraRecord.describe('Additional source-water measurements and reporting metadata (e.g., nitrate_basis, hardness_basis, arsenic_speciation).'),
   })
   .strict();
 
 const treatmentTargetsSchema = z
   .object({
+    tds_mg_L: finiteMeasurement.nonnegative().optional(),
     arsenic_ug_L: finiteMeasurement.nonnegative().optional(),
-    nitrate_mg_L: finiteMeasurement.nonnegative().optional().describe('Nitrate effluent target in mg/L. Declare extra.nitrate_basis as "as NO3" or "as N" independently of the influent basis; do not infer or automatically convert it.'),
+    nitrate_mg_L: finiteMeasurement.nonnegative().optional().describe('Nitrate effluent target in mg/L; declare extra.nitrate_basis as "as NO3" or "as N".'),
     fluoride_mg_L: finiteMeasurement.nonnegative().optional(),
     turbidity_NTU: finiteMeasurement.nonnegative().optional(),
     toc_mg_L: finiteMeasurement.nonnegative().optional(),
+    hardness_mg_L: finiteMeasurement.nonnegative().optional(),
+    iron_mg_L: finiteMeasurement.nonnegative().optional(),
+    boron_mg_L: finiteMeasurement.nonnegative().optional(),
     e_coli: z.string().trim().max(256).optional(),
     compliance_standard: z.string().trim().max(256).optional(),
-    extra: extraRecord.describe('Additional effluent targets and reporting metadata. Use lead_ug_L for a lead target in µg/L and nitrate_basis ("as NO3" or "as N") for nitrate. Preserve the stated target and basis; do not automatically convert values.'),
+    extra: extraRecord.describe('Additional effluent targets and reporting metadata (e.g., lead_ug_L, nitrate_basis).'),
   })
   .strict();
 
@@ -198,7 +205,7 @@ const constraintsSchema = z
     use_for_drinking: z.boolean().optional(),
     footprint_constraint: z.string().trim().max(512).optional(),
     chemical_dosing_allowed: z.boolean().optional(),
-    extra: extraRecord.describe('Additional site constraints. Use design_flow_m3_day for a numeric design flow in m³/day; preserve the reported units and do not invent or automatically convert a flow.'),
+    extra: extraRecord.describe('Additional site constraints: design_flow_m3_day, min_recovery, max_sec_kwh_m3, max_lcow_usd_m3, max_footprint_m2.'),
   })
   .strict();
 
@@ -290,7 +297,7 @@ async function immediateBackendCall(
     env: ctx.env,
   });
   const report = commandReport(result);
-  return result.code === 0 ? ok(report) : fail('OpenAqua backend command failed.', report);
+  return result.code === 0 ? ok(report) : fail('HydroWeaver backend command failed.', report);
 }
 
 async function launchJob(
@@ -347,7 +354,7 @@ async function launchJob(
     return fail('Input preflight failed; no job was launched.', {
       inputs: unusableInputs,
       how_to_fix:
-        'Use readable regular JSON files for queries, predictions, and staged knowledge. Benchmark inputs must be readable directories. Symbolic links are rejected.',
+        'Use readable regular JSON files for queries, reports, and staged knowledge. Benchmark directories must be readable. Symbolic links are rejected.',
     });
   }
 
@@ -450,12 +457,12 @@ function inlineJsonArgument(value: unknown, label: string): string | ToolResult 
   return rendered;
 }
 
-export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
+export const HYDROWEAVER_TOOLS: readonly HydroWeaverTool[] = [
   {
     name: 'hydroweaver_status',
     title: 'HydroWeaver status',
     description:
-      'Inspect the configured OpenAqua checkout, Python runtime, core dependencies, downloaded knowledge assets, indexes, optional OpenRouter configuration, and the optional WaterTAP simulation backend. Run this before using the pipeline on a new machine.',
+      'Inspect the standalone HydroWeaver scientific engine, Python runtime, built-in unit/template knowledge base, AquaDesignGym benchmark readiness, and the optional WaterTAP simulation backend.',
     inputSchema: {},
     async run(_args, ctx) {
       const backend = backendOrError(ctx);
@@ -489,7 +496,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     name: 'hydroweaver_catalog',
     title: 'Browse HydroWeaver taxonomy',
     description:
-      'List or search canonical contaminant names and treatment-unit names from the configured OpenAqua knowledge assets. Use this before constructing structured queries or candidate chains.',
+      'List or search canonical contaminant names, treatment units, operating parameter bounds, and mechanisms from HydroWeaver’s standalone knowledge base.',
     inputSchema: {
       kind: z.enum(['all', 'contaminants', 'units']).optional(),
       search: z.string().trim().max(256).optional(),
@@ -507,7 +514,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     name: 'hydroweaver_normalize_query',
     title: 'Normalize a water-treatment query',
     description:
-      'Run OpenAqua’s parser/taxonomy stage and return the normalized source water, contaminants, targets, constraints, missing fields, assumptions, and normalization notes. Natural-language extraction uses the backend OpenRouter key when configured.',
+      'Normalize source water, contaminants, treatment targets, resource/cost constraints, and measurement units into HydroWeaver’s canonical query structure.',
     inputSchema: { ...QUERY_SHAPE },
     async run(args, ctx) {
       const workDir = jobWorkDir(ctx);
@@ -520,7 +527,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     name: 'hydroweaver_assess_case',
     title: 'Assess water-treatment case readiness',
     description:
-      'Normalize a case into a machine-readable scientific state, identify critical blockers and decision-sensitive missing information, and return a prioritized next-information checklist. The readiness classification is deterministic screening, not a calibrated probability of treatment success or compliance.',
+      'Normalize a case into a machine-readable scientific state, identify critical blockers and decision-sensitive missing information, and return a prioritized next-information checklist.',
     inputSchema: { ...QUERY_SHAPE },
     async run(args, ctx) {
       const workDir = jobWorkDir(ctx);
@@ -533,7 +540,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     name: 'hydroweaver_recommend',
     title: 'Recommend water-treatment trains',
     description:
-      `Run OpenAqua’s complete parser → retriever → planner → critic → explainer pipeline. Returns ranked, taxonomy-constrained early-stage treatment trains with evidence, assumptions, risks, constraint reports, and uncertainty. This is decision support, not final process design. ${PATH_NOTE}`,
+      `Run HydroWeaver’s knowledge-informed generation, joint parameter optimization, simulation, and evidence-binding recommendation pipeline. ${PATH_NOTE}`,
     inputSchema: {
       ...QUERY_SHAPE,
       topK: z.number().int().min(1).max(10).optional(),
@@ -552,9 +559,9 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
   },
   {
     name: 'hydroweaver_retrieve_evidence',
-    title: 'Retrieve HydroWeaver evidence',
+    title: 'Retrieve HydroWeaver knowledge priors',
     description:
-      `Normalize a query and run OpenAqua’s hybrid BM25/token-overlap retrieval over unit-level and case-level knowledge. The backend may build missing indexes before retrieval. ${PATH_NOTE}`,
+      `Normalize a query and retrieve unit-level mechanistic capabilities and template-level process priors from HydroWeaver’s local knowledge base. ${PATH_NOTE}`,
     inputSchema: {
       ...QUERY_SHAPE,
       output: nonEmptyPath.optional(),
@@ -576,9 +583,9 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
   },
   {
     name: 'hydroweaver_check_constraints',
-    title: 'Check candidate treatment trains',
+    title: 'Simulate and diagnose candidate treatment trains',
     description:
-      'Apply OpenAqua’s taxonomy, drinking-water disinfection, brine-disposal, and energy rules to user-supplied candidate trains. The critic may return an explicit auto-revision for missing disinfection or an incompatible membrane step.',
+      'Simulate candidate trains with HydroWeaver’s mechanistic and economic engine, check water-quality, resource, cost, and hydraulic integrity constraints, and return violation diagnoses.',
     inputSchema: {
       ...QUERY_SHAPE,
       candidateChains: z
@@ -589,13 +596,8 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
               .object({
                 chain_id: z.string().trim().min(1).max(256).optional(),
                 chain: z.array(shortText).min(1).max(64),
-                key_units: z.array(shortText).max(64).optional(),
+                parameters: z.record(z.string(), z.record(z.string(), z.number().finite())).optional(),
                 rationale: z.string().trim().max(4_000).optional(),
-                energy_intensity: z
-                  .enum(['low', 'low-medium', 'medium', 'medium-high', 'high'])
-                  .optional(),
-                generates_brine: z.boolean().optional(),
-                requires_disinfection: z.boolean().optional(),
               })
               .strict(),
           ]),
@@ -618,13 +620,14 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
   },
   {
     name: 'hydroweaver_optimize_trains',
-    title: 'Optimize treatment trains through closed-loop critique',
+    title: 'Jointly optimize treatment train structure and operating parameters',
     description:
-      'Run the closed-loop optimization over candidate treatment trains: apply the constraint critic, keep its auto-revisions, and when a round stops making progress regenerate candidates through the planner with a structured revision directive, until every chain passes its constraint checks or the bounded round budget is exhausted. Returns per-round constraint reports, unresolved violations, convergence status, and the feasible trains. Caller-supplied candidateChains are optimized directly; otherwise the pipeline generates the initial trains. This is decision support, not final process design.',
+      'Run HydroWeaver’s closed-loop joint optimizer: coordinates knowledge-informed generation, numerical operating-parameter optimization, process simulation, violation diagnosis, structural-vs-parametric routing, and a shared design history under water-quality, resource, and cost constraints.',
     inputSchema: {
       ...QUERY_SHAPE,
       topK: z.number().int().min(1).max(10).optional(),
-      maxRounds: z.number().int().min(1).max(8).optional().describe('Maximum critique/revision rounds, including the initial evaluation. Default 3.'),
+      maxRounds: z.number().int().min(1).max(12).optional().describe('Maximum closed-loop rounds. Default 4.'),
+      maxSimCalls: z.number().int().min(1).max(500).optional().describe('Matched simulation oracle call budget. Default 60.'),
       candidateChains: z
         .array(
           z.union([
@@ -633,13 +636,8 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
               .object({
                 chain_id: z.string().trim().min(1).max(256).optional(),
                 chain: z.array(shortText).min(1).max(64),
-                key_units: z.array(shortText).max(64).optional(),
+                parameters: z.record(z.string(), z.record(z.string(), z.number().finite())).optional(),
                 rationale: z.string().trim().max(4_000).optional(),
-                energy_intensity: z
-                  .enum(['low', 'low-medium', 'medium', 'medium-high', 'high'])
-                  .optional(),
-                generates_brine: z.boolean().optional(),
-                requires_disinfection: z.boolean().optional(),
               })
               .strict(),
           ]),
@@ -662,24 +660,35 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
       }
       const output = outputPath(args, workDir, 'optimization');
       const topK = typeof args['topK'] === 'number' ? args['topK'] : 3;
-      const maxRounds = typeof args['maxRounds'] === 'number' ? args['maxRounds'] : 3;
-      argv.push('--top-k', String(topK), '--max-rounds', String(maxRounds), '--output', output);
+      const maxRounds = typeof args['maxRounds'] === 'number' ? args['maxRounds'] : 4;
+      const maxSimCalls = typeof args['maxSimCalls'] === 'number' ? args['maxSimCalls'] : 60;
+      argv.push(
+        '--top-k',
+        String(topK),
+        '--max-rounds',
+        String(maxRounds),
+        '--max-sim-calls',
+        String(maxSimCalls),
+        '--output',
+        output,
+      );
       return launchJob(ctx, argv, 'hydroweaver_optimize_trains', 'optimize', { ...args, output });
     },
   },
   {
     name: 'hydroweaver_simulate_train',
-    title: 'Simulate a treatment train with WaterTAP',
+    title: 'Simulate or NLP-optimize a flowsheet with WaterTAP',
     description:
-      'Build the declared treatment train as a WaterTAP/IDAES flowsheet and solve it with IPOPT. Returns per-unit results (pump outlet pressure and power, membrane recovery, permeate salinity, membrane area), flowsheet totals (product and concentrate flows, recovery, specific energy), solver status, the unit coverage decision, and the WaterTAP/IDAES/Pyomo versions used. Scientific scope: the MVP property package models water and sodium chloride, so results describe salinity-driven hydraulics and energy — they do NOT predict trace-contaminant rejection or target attainment, and units without a mechanistic model (for example adsorption, coagulation, chlorination) are reported as unsupported instead of simulated. An unconverged solver status means unconverged, not infeasible. Requires a configured simulation backend (HYDROWEAVER_SIM_PYTHON); see docs/SIMULATION.md.',
+      'Build the declared treatment train as a WaterTAP/IDAES flowsheet with WaterTAPCosting and solve (or NLP-optimize LCOW when optimizeDesign=true) with IPOPT. Scientific scope: the NaCl property package models water and sodium chloride salinity, so WaterTAP results describe salinity-driven hydraulics, energy, and CAPEX/OPEX/LCOW — they do NOT predict trace-contaminant rejection, and units without a WaterTAP model are reported as unsupported. An unconverged solver status means unconverged, not infeasible. Requires HYDROWEAVER_SIM_PYTHON; see docs/SIMULATION.md.',
     inputSchema: {
-      queryFile: nonEmptyPath.describe(`JSON file containing the OpenAqua UserQuery case (source_water, water_quality, treatment_targets, constraints). ${PATH_NOTE}`),
+      queryFile: nonEmptyPath.describe(`JSON file containing the HydroWeaver UserQuery case. ${PATH_NOTE}`),
       chain: z.array(shortText).min(1).max(64).describe('Ordered treatment-unit names of the candidate train, for example ["Pumping", "Reverse Osmosis"].'),
-      chainId: z.string().trim().min(1).max(256).optional().describe('Identifier recorded with the train; a stable id is generated when absent.'),
+      chainId: z.string().trim().min(1).max(256).optional().describe('Identifier recorded with the train.'),
+      optimizeDesign: z.boolean().optional().describe('When true, unfixes pump pressure, membrane area, and recovery within bounds and solves a Pyomo+IPOPT NLP minimizing LCOW.'),
       waterRecovery: z.number().min(0.05).max(0.95).optional().describe('Declared water-recovery target for the last membrane; default 0.5.'),
       feedSalinityGL: z.number().nonnegative().optional().describe('Feed salinity in g/L NaCl-equivalent; declared case TDS is used when absent.'),
       designFlowM3Day: z.number().positive().optional().describe('Design feed flow in m3/day; the declared case value or a nominal 100 m3/day basis is used when absent.'),
-      output: nonEmptyPath.optional().describe('Simulation result JSON path. A timestamped workspace path is used by default.'),
+      output: nonEmptyPath.optional().describe('Simulation result JSON path.'),
       ...waitShape,
     },
     async run(args, ctx) {
@@ -726,12 +735,13 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
           how_to_fix: simulationSetupGuidance(),
         });
       }
-      const command = [backend.python, simulationRunnerPath(ctx.env), 'simulate', '--input', inputPath, '--output', output];
+      const simSubcommand = args['optimizeDesign'] === true ? 'optimize-design' : 'simulate';
+      const command = [backend.python, simulationRunnerPath(ctx.env), simSubcommand, '--input', inputPath, '--output', output];
       let provenance: ReturnType<typeof createEngineeringJobRequest>;
       try {
         provenance = createEngineeringJobRequest({
           toolName: 'hydroweaver_simulate_train',
-          operation: 'simulate',
+          operation: simSubcommand,
           backend: { command: [backend.python, simulationRunnerPath(ctx.env)], source: backend.source },
           backendVersion: selfCheck.versions['watertap'] ?? undefined,
           args: { queryFile: casePath, chain, chainId: payload.train.chain_id, output, options: payload.options },
@@ -755,7 +765,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
         job = startJob(ctx.jobsRoot, command, {
           workDir,
           env: ctx.env,
-          label: 'simulate',
+          label: simSubcommand,
           provenance,
         });
       } catch (error) {
@@ -782,9 +792,9 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
   },
   {
     name: 'hydroweaver_build_indexes',
-    title: 'Build HydroWeaver indexes',
+    title: 'Build HydroWeaver local knowledge index',
     description:
-      `Rebuild corpus.jsonl and the BM25 index from the downloaded OpenAqua unit-level and case-level knowledge assets. Existing generated indexes are replaced. ${PATH_NOTE}`,
+      `Rebuild HydroWeaver’s local corpus.jsonl from built-in unit/template priors and staged local knowledge records under HYDROWEAVER_HOME. ${PATH_NOTE}`,
     inputSchema: {
       output: nonEmptyPath.optional().describe('JSON build report path.'),
       ...waitShape,
@@ -803,9 +813,9 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
   },
   {
     name: 'hydroweaver_ingest_knowledge',
-    title: 'Stage HydroWeaver knowledge',
+    title: 'Stage local HydroWeaver knowledge',
     description:
-      `Stage a kb_unit or kb_case JSON record under OpenAqua’s data/ingest directory and optionally rebuild the canonical indexes. OpenAqua v1 does not automatically merge staged records into its canonical TDB/case files; the result explicitly reports that curation boundary. ${PATH_NOTE}`,
+      `Stage a kb_unit or kb_case JSON record under HYDROWEAVER_HOME/ingest and optionally rebuild the local HydroWeaver knowledge corpus. ${PATH_NOTE}`,
     inputSchema: {
       kbType: z.enum(['kb_unit', 'kb_case']),
       dataFile: nonEmptyPath.describe('Regular JSON object file to stage.'),
@@ -835,76 +845,58 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     },
   },
   {
-    name: 'hydroweaver_evaluate_trains',
-    title: 'Evaluate treatment-train predictions',
+    name: 'hydroweaver_gym_tasks',
+    title: 'Inspect AquaDesignGym tasks and methods',
     description:
-      `Run OpenAqua’s WContBench treatment-train metrics: macro precision, recall, F1, coverage, hit rate, and case-level acceptability. Benchmark directories come from the OpenAqua Hugging Face dataset. ${PATH_NOTE}`,
-    inputSchema: {
-      benchmarkDir: nonEmptyPath,
-      predictions: nonEmptyPath.describe('Prediction JSON or JSONL accepted by test_openaqua.py.'),
-      output: nonEmptyPath.optional(),
-      ...waitShape,
-    },
-    async run(args, ctx) {
-      const workDir = jobWorkDir(ctx);
-      const benchmarkDir = resolveJobPath(String(args['benchmarkDir']), workDir);
-      const predictions = resolveJobPath(String(args['predictions']), workDir);
-      const output = outputPath(args, workDir, 'train-evaluation');
-      return launchJob(
-        ctx,
-        ['evaluate-trains', '--benchmark-dir', benchmarkDir, '--predictions', predictions, '--output', output],
-        'hydroweaver_evaluate_trains',
-        'evaluate-trains',
-        { ...args, benchmarkDir, predictions, output },
-      );
+      'List standardized AquaDesignGym benchmark tasks, admissible structural/parametric actions, varying influent perturbation profiles, and registered baselines/ablations.',
+    inputSchema: {},
+    async run(_args, ctx) {
+      return immediateBackendCall(ctx, ['gym-tasks'], 60_000);
     },
   },
   {
-    name: 'hydroweaver_evaluate_retrieval',
-    title: 'Evaluate retrieval predictions',
+    name: 'hydroweaver_evaluate_gym',
+    title: 'Run AquaDesignGym benchmark evaluation',
     description:
-      `Run OpenAqua’s WContBench retrieval Precision@k, Recall@k, and Hit@k metrics against gold evidence lists. ${PATH_NOTE}`,
+      `Run the AquaDesignGym matched-budget evaluation protocol comparing HydroWeaver against conventional optimizers, existing agent baselines, and component ablations across nominal and perturbed influent conditions (assessing feasible-design rates, LCOW, robustness, and simulation efficiency). ${PATH_NOTE}`,
     inputSchema: {
-      benchmarkDir: nonEmptyPath,
-      predictions: nonEmptyPath.describe('Retrieval prediction JSON accepted by test_retrieval.py.'),
-      kValues: z.array(z.number().int().min(1).max(1_000)).min(1).max(20).optional(),
-      output: nonEmptyPath.optional(),
+      methods: z.array(shortText).min(1).max(30).optional().describe('Subset of registered methods to evaluate; defaults to all.'),
+      tasks: z.array(shortText).min(1).max(30).optional().describe('Subset of AquaDesignGym task_ids; defaults to all.'),
+      perturbations: z.array(z.enum(['nominal', 'mild_shift', 'severe_shift'])).min(1).max(5).optional(),
+      maxSimCalls: z.number().int().min(5).max(500).optional().describe('Matched simulation budget per episode (default 60).'),
+      seed: z.number().int().min(0).max(1_000_000).optional(),
+      benchmarkDir: nonEmptyPath.optional().describe('Optional local benchmark metadata directory to fingerprint in run provenance.'),
+      output: nonEmptyPath.optional().describe('Evaluation JSON path.'),
       ...waitShape,
     },
     async run(args, ctx) {
       const workDir = jobWorkDir(ctx);
-      const benchmarkDir = resolveJobPath(String(args['benchmarkDir']), workDir);
-      const predictions = resolveJobPath(String(args['predictions']), workDir);
-      const output = outputPath(args, workDir, 'retrieval-evaluation');
-      const values = ((args['kValues'] as number[] | undefined) ?? [1, 3, 5]);
-      const k = [...new Set(values)].join(',');
-      return launchJob(
-        ctx,
-        [
-          'evaluate-retrieval',
-          '--benchmark-dir',
-          benchmarkDir,
-          '--predictions',
-          predictions,
-          '--k',
-          k,
-          '--output',
-          output,
-        ],
-        'hydroweaver_evaluate_retrieval',
-        'evaluate-retrieval',
-        { ...args, benchmarkDir, predictions, output, kValues: values },
-      );
+      const output = outputPath(args, workDir, 'aquadesigngym-evaluation');
+      const argv = ['gym-eval', '--output', output];
+      if (Array.isArray(args['methods'])) argv.push('--methods', args['methods'].join(','));
+      if (Array.isArray(args['tasks'])) argv.push('--tasks', args['tasks'].join(','));
+      if (Array.isArray(args['perturbations'])) argv.push('--perturbations', args['perturbations'].join(','));
+      if (typeof args['maxSimCalls'] === 'number') argv.push('--max-sim-calls', String(args['maxSimCalls']));
+      if (typeof args['seed'] === 'number') argv.push('--seed', String(args['seed']));
+      const benchmarkDir =
+        typeof args['benchmarkDir'] === 'string'
+          ? resolveJobPath(args['benchmarkDir'], workDir)
+          : undefined;
+      return launchJob(ctx, argv, 'hydroweaver_evaluate_gym', 'gym-eval', {
+        ...args,
+        ...(benchmarkDir === undefined ? {} : { benchmarkDir }),
+        output,
+      });
     },
   },
   {
     name: 'hydroweaver_audit_report',
     title: 'Audit a HydroWeaver recommendation report',
     description:
-      `Build a machine-readable claim-evidence ledger and structurally audit evidence citations, declared support types, constraint status, uncertainty, and selected quantitative-claim signals. This does not establish semantic entailment, source quality, treatment performance, safety, or compliance. ${PATH_NOTE}`,
+      `Build a machine-readable claim-evidence ledger and structurally audit citations, declared support types, constraint feasibility, and uncertainty declarations. ${PATH_NOTE}`,
     inputSchema: {
-      reportFile: nonEmptyPath.describe('OpenAqua FinalReport JSON file to audit.'),
-      output: nonEmptyPath.optional().describe('Audit JSON path. A timestamped workspace path is used by default.'),
+      reportFile: nonEmptyPath.describe('HydroWeaver recommendation report JSON file to audit.'),
+      output: nonEmptyPath.optional().describe('Audit JSON path.'),
       ...waitShape,
     },
     async run(args, ctx) {
@@ -965,7 +957,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
     name: 'hydroweaver_job_manifest',
     title: 'Inspect HydroWeaver run manifest',
     description:
-      'Read validated parameters, backend/runtime identity, non-secret scientific model settings, input and payload fingerprints, lifecycle state, a completion-time configured-output fingerprint, and a bounded artifact inventory. Request and result identities are verified separately; neither freezes remote model behavior.',
+      'Read validated parameters, backend/runtime identity, scientific configuration, input/payload fingerprints, lifecycle state, output fingerprint, and artifact inventory.',
     inputSchema: {
       jobId: jobIdSchema,
       maxEntries: z.number().int().min(1).max(1_000).optional(),
@@ -996,7 +988,7 @@ export const HYDROWEAVER_TOOLS: readonly OpenAquaTool[] = [
         note:
           provenance?.manifest === undefined
             ? 'No run manifest is available for this legacy or non-engineering job.'
-            : 'requestSha256 identifies the requested operation; result.resultSha256 identifies the captured configured output when present. Preserve the OpenAqua revision, dataset/index snapshot, model settings, and result files for a reproducible comparison.',
+            : 'requestSha256 identifies the requested operation; result.resultSha256 identifies the captured configured output when present.',
       });
     },
   },
@@ -1107,23 +1099,11 @@ function jobStoreForId(ctx: ToolContext, id: string): string | undefined {
 }
 
 const SCIENTIFIC_ENVIRONMENT_KEYS = [
-  'HYDROWEAVER_OPENROUTER_MODEL',
+  'HYDROWEAVER_PYTHON',
+  'HYDROWEAVER_SIM_PYTHON',
   'HYDROWEAVER_DEFAULT_MODEL',
   'HYDROWEAVER_PLANNER_MODEL',
   'HYDROWEAVER_EXPLANATION_MODEL',
-  'DEFAULT_MODEL',
-  'PLANNER_MODEL',
-  'EXPLANATION_MODEL',
-  'LLM_TEMPERATURE',
-  'LLM_MAX_TOKENS',
-  'TOP_K_RETRIEVAL',
-  'TOP_K_RERANK',
-  'BM25_WEIGHT',
-  'EMBEDDING_WEIGHT',
-  'EMBEDDING_MODEL',
-  'TOP_K_RECOMMENDATIONS',
-  'MAX_PLANNING_CANDIDATES',
-  'MAX_CRITIC_ITERATIONS',
 ] as const;
 
 function scientificConfigurationForRun(
@@ -1135,39 +1115,17 @@ function scientificConfigurationForRun(
     const adapterReported: Record<string, unknown> = {};
     copyConfigurationValues(adapterIdentity, adapterReported, [
       'adapter_version',
-      'backend_revision',
+      'engine_mode',
       'python',
     ]);
     for (const [section, keys] of [
-      [
-        'models',
-        [
-          'openrouter_configured',
-          'default_model',
-          'planner_model',
-          'explanation_model',
-          'llm_temperature',
-          'llm_max_tokens',
-        ],
-      ],
-      [
-        'retrieval',
-        [
-          'top_k_retrieval',
-          'top_k_rerank',
-          'bm25_weight',
-          'embedding_weight',
-          'embedding_model',
-        ],
-      ],
-      [
-        'planning',
-        [
-          'top_k_recommendations',
-          'max_planning_candidates',
-          'max_critic_iterations',
-        ],
-      ],
+      ['knowledge', ['units', 'contaminants', 'templates']],
+      ['optimization', ['joint_config_and_params', 'parameter_optimizer', 'diagnosis_router', 'shared_design_history']],
+      ['aquadesigngym', ['tasks']],
+      ['gym', ['benchmark', 'tasks', 'perturbations', 'baselines']],
+      ['models', ['default_model', 'planner_model', 'explanation_model', 'llm_temperature', 'llm_max_tokens']],
+      ['retrieval', ['top_k_retrieval', 'top_k_rerank', 'bm25_weight', 'embedding_weight', 'embedding_model']],
+      ['planning', ['top_k_recommendations', 'max_planning_candidates', 'max_critic_iterations']],
     ] as const) {
       const source = adapterIdentity[section];
       if (!isRecord(source)) continue;

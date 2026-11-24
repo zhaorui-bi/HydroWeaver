@@ -102,7 +102,7 @@ export function renderBrandedWelcome(options: BrandedWelcomeOptions): string[] {
     currentTheme.fg(
       'textDim',
       truncateToWidth(
-        'Liu et al., Water Res. 308 (2027) 126761, doi:10.1016/j.watres.2026.126761',
+        'HydroWeaver · Agentic Closed-Loop Optimization & AquaDesignGym',
         Math.max(8, innerWidth - 7),
         '…',
       ),

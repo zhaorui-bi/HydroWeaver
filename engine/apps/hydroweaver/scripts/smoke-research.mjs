@@ -181,7 +181,9 @@ async function adapterFixture() {
   if (operation === 'identity') {
     process.stdout.write(JSON.stringify({
       backend_revision: 'fixture-revision',
-      models: { openrouter_configured: false },
+      knowledge: { units: 17, contaminants: 12, templates: 10 },
+      optimization: { joint_config_and_params: true },
+      gym: { benchmark: 'AquaDesignGym', tasks: 12 },
       retrieval: { top_k_retrieval: 1 },
       planning: { top_k_recommendations: 3 },
     }));

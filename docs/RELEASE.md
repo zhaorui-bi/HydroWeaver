@@ -109,7 +109,7 @@ water-quality inputs. Do not place credentials or unpublished data in CI artifac
 5. Verify job status, timestamps, bounded logs, and artifact indexing.
 6. Exercise graceful cancellation on a disposable job.
 7. Confirm that a restarted server can recover the completed job.
-8. Record HydroWeaver, OpenAqua commit, Hugging Face revision, index chunk count,
+8. Record HydroWeaver version, Python version, optional WaterTAP version,
    provider/model, and operating-system versions.
 
 This is an integration gate, not evidence that a treatment train is compliant,
@@ -144,10 +144,12 @@ Resources/harness/dist/job-runner.mjs
 Resources/harness/dist/search-worker.mjs
 Resources/harness/skills/
 Resources/harness/backend/hydroweaver_cli.py
+Resources/harness/hydroweaver_py/
+Resources/harness/aquadesigngym/
+Resources/harness/sim/
 Resources/web-ui/
 Resources/licenses/HYDROWEAVER_LICENSE
 Resources/licenses/KIMI_CODE_LICENSE
-Resources/licenses/OPENAQUA_UPSTREAM_LICENSE
 Resources/licenses/THIRD_PARTY_NOTICES.md
 Resources/licenses/SBOM.spdx.json
 Resources/licenses/ELECTRON_LICENSE

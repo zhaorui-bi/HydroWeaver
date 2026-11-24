@@ -8,12 +8,12 @@ import { ASCII_LOGO } from './banner';
 import { CliArgumentError, parseCliInvocation } from './cli-args';
 import { runDoctor, formatDoctorReport } from './doctor';
 import {
-  attachOpenAquaTools,
+  attachHydroWeaverTools,
   createDefaultSession,
-  createOpenAquaHarness,
-  ensureOpenAquaSkillDirs,
+  createHydroWeaverHarness,
+  ensureHydroWeaverSkillDirs,
   promptTurnToEnd,
-  resolveOpenAquaHome,
+  resolveHydroWeaverHome,
 } from './harness';
 import { runOnboard } from './onboard';
 import { runResearchCommand } from './hydroweaver/research-tools';
@@ -45,7 +45,7 @@ Usage:
   hydroweaver onboard [options]    guided setup: home dir, credentials import,
                                     [--yes] [--home DIR]
                                     backend detection, MCP + skills
-                                    [--hydroweaver-command COMMAND | --hydroweaver-repo DIR]
+                                    [--hydroweaver-command COMMAND | --hydroweaver-python PYTHON]
                                     [--import-from DIR]
                                     model provider (API key, no login required):
                                     [--provider kimi-coding|zai|deepseek|custom]
@@ -54,11 +54,16 @@ Usage:
   hydroweaver tools [--json]       list HydroWeaver query, retrieval, design, evaluation,
                                     and durable-job tools exposed to the agent
                                     [--home DIR]
-  hydroweaver optimize [options]   run the closed-loop treatment-train optimization
+  hydroweaver optimize [options]   run the closed-loop joint configuration & parameter optimizer
                                     [--input FILE] [--top-k N] [--max-rounds N]
-                                    [--wait] [--home DIR]
+                                    [--max-sim-calls N] [--wait] [--home DIR]
                                     FILE is a UserQuery JSON document; without --wait
                                     a durable job id is returned immediately
+  hydroweaver gym <action>         interact with the AquaDesignGym matched-budget benchmark;
+                                    actions: tasks, eval
+                                    eval: [--methods LIST] [--tasks LIST]
+                                          [--perturbations LIST] [--max-sim-calls N]
+                                          [--seed N] [--wait] [--home DIR]
   hydroweaver research <action>    control a durable case-to-report research task;
                                     actions: create, status, list, advance, respond, cancel
                                     [--input FILE] [--home DIR]
@@ -71,17 +76,16 @@ Usage:
   hydroweaver <command> --help     print this help
 
 Environment:
-  HYDROWEAVER_HOME     HydroWeaver data directory (config.toml, credentials, mcp.json).
-                      Defaults to ~/.hydroweaver.
-  HYDROWEAVER_COMMAND  JSON array overriding the adapter-compatible backend command.
-  HYDROWEAVER_REPO     OpenAqua repository checkout containing water_treatment_agent/.
-  HYDROWEAVER_PYTHON   Optional Python interpreter for that checkout.
-  OPENROUTER_API_KEY Optional key used by OpenAqua parsing/planning/explanation agents.
-  HYDROWEAVER_WORKDIR  Default working directory for research and optimization jobs.
-  HYDROWEAVER_JOBS_DIR Explicit job store; disables legacy-store discovery.
-                      Default: <HYDROWEAVER_WORKDIR or cwd>/hydroweaver-jobs.
-                      Older MCP jobs in <current cwd>/hydroweaver-jobs remain accessible;
-                      set HYDROWEAVER_JOBS_DIR to access other old locations.
+  HYDROWEAVER_HOME        HydroWeaver data directory (config.toml, credentials, mcp.json).
+                          Defaults to ~/.hydroweaver.
+  HYDROWEAVER_COMMAND     JSON array overriding the standalone backend command.
+  HYDROWEAVER_PYTHON      Python 3 interpreter used to run HydroWeaver's built-in engine.
+  HYDROWEAVER_SIM_PYTHON  Optional WaterTAP/IDAES/Pyomo/IPOPT Python environment.
+  HYDROWEAVER_WORKDIR     Default working directory for research and optimization jobs.
+  HYDROWEAVER_JOBS_DIR    Explicit job store; disables legacy-store discovery.
+                          Default: <HYDROWEAVER_WORKDIR or cwd>/hydroweaver-jobs.
+                          Older MCP jobs in <current cwd>/hydroweaver-jobs remain accessible;
+                          set HYDROWEAVER_JOBS_DIR to access other old locations.
 `;
 
 let activeHarness: KimiHarness | undefined;
@@ -133,7 +137,7 @@ async function main(argv: readonly string[]): Promise<void> {
         yes: invocation.yes,
         homeDir: invocation.homeDir,
         hydroweaverCommand: invocation.hydroweaverCommand,
-        hydroweaverRepo: invocation.hydroweaverRepo,
+        hydroweaverPython: invocation.hydroweaverPython,
         importFrom: invocation.importFrom,
         provider: invocation.provider,
         apiKey: invocation.apiKey,
@@ -150,7 +154,7 @@ async function main(argv: readonly string[]): Promise<void> {
       const env = invocation.homeDir === undefined
         ? process.env
         : { ...process.env, HYDROWEAVER_HOME: invocation.homeDir };
-      const homeDir = resolveOpenAquaHome(env);
+      const homeDir = resolveHydroWeaverHome(env);
       const stores = resolveJobStores(env);
       const result = await runResearchCommand(invocation.action, {
         inputFile: invocation.inputFile,
@@ -166,7 +170,7 @@ async function main(argv: readonly string[]): Promise<void> {
         invocation.homeDir === undefined
           ? process.env
           : { ...process.env, HYDROWEAVER_HOME: invocation.homeDir };
-      const homeDir = resolveOpenAquaHome(env);
+      const homeDir = resolveHydroWeaverHome(env);
       const stores = resolveJobStores(env);
       const tool = HYDROWEAVER_TOOLS.find((entry) => entry.name === 'hydroweaver_optimize_trains');
       if (tool === undefined) throw new Error('The closed-loop optimization tool is not registered.');
@@ -174,8 +178,37 @@ async function main(argv: readonly string[]): Promise<void> {
         queryFile: invocation.inputFile,
         topK: invocation.topK,
         maxRounds: invocation.maxRounds,
+        maxSimCalls: invocation.maxSimCalls,
         wait: invocation.wait,
       }, { homeDir, ...stores, env });
+      for (const item of result.content) process.stdout.write(`${item.text}\n`);
+      if (result.isError === true) process.exitCode = 1;
+      return;
+    }
+    case 'gym': {
+      const env =
+        invocation.homeDir === undefined
+          ? process.env
+          : { ...process.env, HYDROWEAVER_HOME: invocation.homeDir };
+      const homeDir = resolveHydroWeaverHome(env);
+      const stores = resolveJobStores(env);
+      const toolName =
+        invocation.action === 'tasks' ? 'hydroweaver_gym_tasks' : 'hydroweaver_evaluate_gym';
+      const tool = HYDROWEAVER_TOOLS.find((entry) => entry.name === toolName);
+      if (tool === undefined) throw new Error(`${toolName} is not registered.`);
+      const result = await tool.run(
+        invocation.action === 'tasks'
+          ? {}
+          : {
+              methods: invocation.methods,
+              tasks: invocation.tasks,
+              perturbations: invocation.perturbations,
+              maxSimCalls: invocation.maxSimCalls,
+              seed: invocation.seed,
+              wait: invocation.wait,
+            },
+        { homeDir, ...stores, env },
+      );
       for (const item of result.content) process.stdout.write(`${item.text}\n`);
       if (result.isError === true) process.exitCode = 1;
       return;
@@ -185,7 +218,7 @@ async function main(argv: readonly string[]): Promise<void> {
         invocation.homeDir === undefined
           ? process.env
           : { ...process.env, HYDROWEAVER_HOME: invocation.homeDir };
-      const homeDir = resolveOpenAquaHome(env);
+      const homeDir = resolveHydroWeaverHome(env);
       const workDir = resolveUserPath(env['HYDROWEAVER_WORKDIR'] ?? process.cwd());
       const jobsDir = resolveUserPath(
         env['HYDROWEAVER_JOBS_DIR'] ?? path.join(workDir, 'hydroweaver-jobs'),
@@ -226,14 +259,14 @@ async function main(argv: readonly string[]): Promise<void> {
 
 async function openHarness(): Promise<{ harness: KimiHarness; session: Session }> {
   registerSigintHandler();
-  const homeDir = resolveOpenAquaHome();
-  const harness = createOpenAquaHarness(homeDir);
+  const homeDir = resolveHydroWeaverHome();
+  const harness = createHydroWeaverHarness(homeDir);
   activeHarness = harness;
   process.stderr.write(ASCII_LOGO);
-  await ensureOpenAquaSkillDirs(harness);
+  await ensureHydroWeaverSkillDirs(harness);
   const session = await createDefaultSession(harness);
   try {
-    await attachOpenAquaTools(session, homeDir);
+    await attachHydroWeaverTools(session, homeDir);
   } catch (error: unknown) {
     process.stderr.write(`warning: could not attach HydroWeaver MCP tools: ${String(error)}\n`);
   }

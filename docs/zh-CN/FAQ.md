@@ -1,55 +1,31 @@
 # 常见问题
 
-[English](../FAQ.md) | 简体中文
+[English](../FAQ.md) | **简体中文**
 
 ### HydroWeaver 是什么？
 
-它是围绕开源 OpenAqua 水处理研究框架构建的独立本地工作台，增加了智能体交互、MCP 工具、持久化任务、运行溯源、CLI/TUI/Web/桌面端、安装向导与诊断。
+HydroWeaver 是面向水处理工艺路线设计的独立智能体闭环优化框架，可在水质、资源与成本约束下联合优化工艺单元组合与连续运行参数，并内置交互式基准环境 **AquaDesignGym** 与可选 **WaterTAP** 流程模拟接口。
 
-### 本仓库是否包含 OpenAqua 和数据集？
+### 是否依赖外部仓库或第三方 Python 包？
 
-不包含。HydroWeaver 仅包含适配器，不包含 OpenAqua 源码、Python 依赖、处理后知识库或 WContBench。需要单独克隆 OpenAqua，并从 Hugging Face 下载 `zhaorui-bi/OpenAqua`。
+不依赖。默认模式通过内置 `hydroweaver_py` 与 `aquadesigngym` 在 Python 3.10+ 标准库上直接运行，零外部仓库依赖、零额外 pip 安装要求。
 
-### 为什么有两套模型配置？
+### 闭环联合优化解决了什么问题？
 
-基于 Kimi Code 引擎的 HydroWeaver 需要对话模型来规划并调用工具；OpenAqua 可选使用 OpenRouter 完成自然语言解析、规划和解释。两者凭据相互独立。未设置 `OPENROUTER_API_KEY` 时，OpenAqua 会使用规则/模板回退，但自然语言质量会下降。
+传统一次生成方案只“看似合理”，但缺乏质量守恒、渗透压、结垢、膜污染、消毒 CT 与全生命周期成本（LCOW）验证。HydroWeaver 将知识驱动配置生成、有界坐标+Hooke–Jeeves 数值优化、稳态机理与 LCOW 模拟、违约诊断与结构/参数路由以及 `SharedDesignHistory` 集成在同一闭环中。
 
-### 如何避免把水质数据发给远程 OpenRouter 模型？
+### AquaDesignGym 评测协议包含哪些维度？
 
-使用结构化字段并不设置 `OPENROUTER_API_KEY`。但 HydroWeaver 的对话模型仍可能接收提示词和工具输出；敏感数据应使用经批准的本地或私有模型，并遵守所在机构的数据政策。
+在严格匹配的 `max_sim_calls` 模拟预算下，在 12 个标准化设计任务与 3 种进水扰动（`nominal`、`mild_shift`、`severe_shift`）上，对比 HydroWeaver 与常规优化器、既有智能体基线及 5 类组件消融，汇报可行设计率（FDR）、平均可行 LCOW、SEC、达到可行所需模拟次数（S2F）与可行率–预算曲线下面积（AUFBC）。
 
-### 后端如何定位？
+### 何时使用 `HYDROWEAVER_SIM_PYTHON`？
 
-可运行 `hydroweaver onboard --hydroweaver-repo /path/to/OpenAqua`，设置 `HYDROWEAVER_REPO`，或提供兼容适配器协议的 `HYDROWEAVER_COMMAND`。HydroWeaver 能识别仓库根目录以及 `water_treatment_agent/` 下的虚拟环境；`HYDROWEAVER_PYTHON` 可显式指定解释器。
+当需要运行严格的 WaterTAP / IDAES / Pyomo / IPOPT NaCl 流程图仿真与 NLP 经济优化（`optimizeDesign: true`）时，将该环境变量指向 WaterTAP 环境即可。详见 [SIMULATION.md](../SIMULATION.md)。
 
-### 为什么状态显示后端可运行，但数据缺失？
+### 推荐方案能否直接用于工程施工？
 
-后端健康只表示适配器和 Python 能启动。OpenAqua 的处理后知识库位于 Hugging Face，而不在 Git 仓库中。请下载并解压 `data.zip`，再构建索引。
-
-### `hydroweaver_ingest_knowledge` 会让检索立即使用新记录吗？
-
-不会保证。它遵循 OpenAqua v1 行为，将 JSON 写入 `data/ingest`。原版 `IndexBuilder` 读取规范 TDB 和案例文件，不会自动合并暂存记录。暂存文件应作为后续人工整理输入。
-
-### 推荐结果可以直接实施吗？
-
-不可以。分类体系和规则检查不能证明去除性能、水力条件、残余物处置、化学兼容性、成本、可靠性、法规合规或现场可施工性。必须经过专业审核和场地化试验/设计。
-
-### WContBench 衡量什么？
-
-它比较预测处理单元或检索证据与基准参考的一致性，不衡量真实出水性能，也不构成法规合规证明。
-
-### 任务与输出保存在哪里？
-
-任务默认在 `<workdir>/hydroweaver-jobs/`，结果默认在 `<workdir>/hydroweaver-output/`。可用 `hydroweaver_job_list`、`hydroweaver_job_manifest` 和 `hydroweaver_job_artifacts` 恢复。
-
-### HydroWeaver 智能体需要 OAuth 吗？
-
-不需要。模型提供方使用 API key。推荐通过环境变量引用密钥；直接使用 `--api-key` 会把明文写入配置，并可能残留在 shell 历史中。
-
-### HydroWeaver 与 Kimi Code 是什么关系？
-
-本项目 vendored 了 MIT 许可的 Kimi Code 引擎，但属于独立产品。HydroWeaver 专属层位于 `engine/apps/hydroweaver`；直接运行上游 Kimi Code 时仍保持其原生身份和行为。
+不能。模型仿真与 AquaDesignGym 的“feasible”仅针对所建数学约束成立，正式工程实施前仍须完成专业审校、烧杯/中试试验与场地合规设计。
 
 ### 如何报告问题？
 
-请在 <https://github.com/zhaorui-bi/HydroWeaver/issues> 提交，并附脱敏后的 `hydroweaver doctor --json`、操作系统、Node/Python 版本、OpenAqua commit 和最小复现。安全漏洞请使用 [SECURITY.md](../../SECURITY.md) 中的私密渠道。
+请在 <https://github.com/zhaorui-bi/HydroWeaver/issues> 提交脱敏后的 `hydroweaver doctor --json`、系统环境版本与最小复现案例；安全漏洞请参阅 [SECURITY.md](../../SECURITY.md)。

@@ -14,7 +14,7 @@ import {
   listResearchTasks,
   respondResearchTask,
 } from './research';
-import type { OpenAquaTool, ToolContext, ToolResult } from './tools';
+import type { HydroWeaverTool, ToolContext, ToolResult } from './tools';
 
 const taskId = z.string().regex(/^research_[a-f0-9]{24}$/);
 const version = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -28,7 +28,7 @@ function defineResearchTool<Schema extends z.ZodObject>(definition: {
   description: string;
   schema: Schema;
   execute(args: z.infer<Schema>, ctx: ToolContext): unknown;
-}): OpenAquaTool {
+}): HydroWeaverTool {
   return {
     name: definition.name,
     title: definition.title,
@@ -47,16 +47,16 @@ function defineResearchTool<Schema extends z.ZodObject>(definition: {
   };
 }
 
-export const RESEARCH_TOOLS: readonly OpenAquaTool[] = [
+export const RESEARCH_TOOLS: readonly HydroWeaverTool[] = [
   defineResearchTool({
     name: 'hydroweaver_research_create',
     title: 'Create a water-treatment research task',
     description:
-      'Freeze a workspace query JSON and a declared objective into a durable research task without starting a backend job. Reuse requestId only for the same request. The gated flow is readiness → assessment → retrieval → recommendation → closed-loop optimization → audit → handoff. Tasks preserve input revisions, bounded job and round budgets, structured information needs, and scientific audit outcomes. The caller declaration is not verified human approval.',
+      'Freeze a workspace query JSON and a declared objective into a durable research task without starting a backend job. Reuse requestId only for the same request. The gated flow is readiness → assessment → retrieval → recommendation → closed-loop joint optimization → optional WaterTAP simulation → audit → handoff. Tasks preserve input revisions, bounded job and round budgets, structured information needs, and scientific audit outcomes. The caller declaration is not verified human approval.',
     schema: z.object({
       requestId: z.string().trim().min(1).max(256),
       objective: z.string().trim().min(1).max(8_000),
-      queryFile: inputPath.describe('Upstream snake_case UserQuery JSON; relative paths resolve from HYDROWEAVER_WORKDIR.'),
+      queryFile: inputPath.describe('HydroWeaver snake_case UserQuery JSON; relative paths resolve from HYDROWEAVER_WORKDIR.'),
       topK: z.number().int().min(1).max(10).optional(),
       maxJobs: z.number().int().min(1).max(16).optional().describe('Total backend-job budget including retries and reassessments; default 8, maximum 16.'),
       maxRounds: z.number().int().min(1).max(8).optional().describe('Closed-loop optimization round budget for the optimization stage; default 3, maximum 8.'),

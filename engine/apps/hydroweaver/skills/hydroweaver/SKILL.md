@@ -1,248 +1,53 @@
 ---
 name: hydroweaver
-description: Create or resume a persistent, gated water-treatment case-to-report research task, or run one independent OpenAqua operation such as readiness, taxonomy, normalization, evidence retrieval, recommendation, closed-loop optimization, constraint checking, report auditing, indexing, evaluation, or durable-job inspection. For benchmark suites or repeated comparisons, use hydroweaver-campaign.
+description: Create or resume a persistent, gated water-treatment case-to-report research task, or run standalone HydroWeaver operations such as readiness checks, taxonomy lookup, query normalization, case assessment, local evidence retrieval, closed-loop joint optimization, constraint simulation and diagnosis, report auditing, indexing, knowledge staging, AquaDesignGym evaluation, or durable-job inspection. For multi-method benchmark suites or repeated comparisons, use hydroweaver-campaign.
 ---
 
-# OpenAqua water-treatment operations
+# HydroWeaver Closed-Loop Water-Treatment Operations
 
-OpenAqua is a five-agent research framework for **early-stage water-treatment
-train design**:
+HydroWeaver is a standalone agentic framework for **jointly designing water
+treatment train configurations and continuous operating parameters** under
+water-quality, resource, and cost constraints (`hydroweaver_py` + optional
+WaterTAP/IPOPT flowsheet simulation + `aquadesigngym`).
 
-```text
-Parser → Retriever → Planner → Critic → Explanation
-```
+## Core Operating Discipline
 
-The harness exposes this workflow through `hydroweaver_*` MCP tools and durable
-background jobs. Recommendations are engineering decision support, not final
-process design, regulatory certification, or evidence that a train will achieve
-a target at a specific site.
+1. Check readiness and canonical names with `hydroweaver_status` and
+   `hydroweaver_catalog`.
+2. Call `hydroweaver_assess_case` before synthesis when influent quality,
+   speciation, reporting bases (`as NO3` vs `as N`, `as CaCO3`), targets,
+   flow, or resource caps may have critical gaps. Never invent missing inputs.
+3. Preserve exact `extra` measurement-basis fields across queries.
+4. Distinguish between:
+   - retrieved evidence chunks (`hydroweaver_retrieve_evidence`),
+   - standalone mechanistic simulation & constraint checks
+     (`hydroweaver_check_constraints`),
+   - closed-loop joint configuration + parameter optimization
+     (`hydroweaver_optimize_trains`), and
+   - optional WaterTAP/IPOPT NaCl flowsheet optimization
+     (`hydroweaver_simulate_train`).
+5. When using `hydroweaver_research_create` / `hydroweaver_research_advance` for
+   durable end-to-end tasks, inspect controller job artifacts and
+   `hydroweaver_audit_report` scientific status rather than re-launching stage
+   jobs manually.
 
-## Operating contract
+## Tool Groups
 
-1. Run `hydroweaver_status` when readiness is unknown. Do not launch design work
-   when the taxonomy, knowledge base, or indexes are missing.
-2. Preserve units exactly. Ask for clarification when concentration units,
-   source-water context, or targets are ambiguous; never silently convert or
-   invent measurements.
-3. Prefer structured fields for measured data and constraints. Natural-language
-   parsing can supplement them, but explicit structured values take precedence.
-4. Distinguish retrieved evidence, OpenAqua rule checks, and model-generated
-   synthesis in every report.
-5. State missing fields, assumptions, uncertainty, and evidence gaps. Do not
-   present an absent citation or weak retrieval match as support.
-6. Ask for confirmation before rebuilding indexes, staging knowledge, replacing
-   an explicit output path, or launching a large evaluation/model workload.
-7. Recommend expert review, applicable regulatory review, treatability testing,
-   pilot testing, and site-specific design before implementation.
-
-## Query checklist
-
-Before recommendation, establish as much of the following as practical:
-
-- source water: groundwater, surface water, wastewater, seawater, or another
-  explicit context;
-- measured water quality with units;
-- contaminants and known synonyms;
-- effluent targets and compliance standard, if any;
-- drinking-water use;
-- budget, energy, operator skill, footprint, chemical-dosing, and brine-disposal
-  constraints;
-- relevant site context and known pretreatment/post-treatment requirements.
-
-Use `hydroweaver_catalog` to check canonical contaminant and treatment-unit names.
-Use `hydroweaver_normalize_query` before a full run when the input is ambiguous or
-contains many synonyms. If only `rawQuery` is supplied and OpenRouter is not
-configured, OpenAqua falls back to structured/rule behavior and may leave the
-contaminant list empty; report that limitation rather than guessing.
-
-Declare reporting bases as well as units. For nitrate, preserve
-`waterQuality.extra.nitrate_basis` and `treatmentTargets.extra.nitrate_basis`
-independently (`"as NO3"` or `"as N"`). Equal mg/L values on different bases
-are not interchangeable. The case audit asks for a documented common basis;
-it does not convert values. For hardness, retain
-`waterQuality.extra.hardness_basis`, for example `"as CaCO3"`.
-Use `treatmentTargets.extra.lead_ug_L` for an explicit lead endpoint, and
-`waterQuality.extra.arsenic_speciation` for measured As(III)/As(V) information.
-An unmeasured speciation remains unknown. Record design flow, when known, in
-`constraints.extra.design_flow_m3_day`. Flow alone does not establish sizing
-readiness. A named standard alone does not supply a numeric endpoint or
-establish its jurisdiction, edition, applicability, or sampling requirements.
-
-Query-file fields use upstream snake_case (`water_quality`,
-`treatment_targets`, `source_water`), while inline MCP inputs use camelCase.
-Preserved extension fields are case context: check `context_preservation`
-before interpreting them as constraints the upstream planner or critic used.
-
-## Case-to-report workflow
-
-For a complete treatment-design request, prefer the persistent research
-controller. Use the original tools below for an independent operation or an
-explicitly requested manual workflow; their direct calls do not acquire the
-research controller's gates.
-
-1. Save the declared case as an upstream snake_case query JSON in the workspace.
-   Preserve measurements, reporting bases, targets, and unknowns; never fill a
-   gap to pass a gate.
-2. Call `hydroweaver_research_create` with `queryFile`, a concrete `objective`, and
-   a stable `requestId`. The default job budget is four, including retries and
-   reassessments; the maximum is 16. Creation freezes the input without starting
-   a job. Reuse the request ID only for the same request, and preserve the
-   returned task ID.
-3. Call `hydroweaver_research_advance` with that task ID and its latest `version`
-   as `expectedVersion`. The controller checks readiness and case information,
-   then links evidence retrieval, recommendation, and structural audit to
-   durable assignments. Repeat advancement at a later decision point to
-   reconcile an existing job; do not relaunch its stage manually.
-4. When the task waits, read the open `attention` items, their `allowedActions`,
-   and `nextAction`. Surface the concrete information need or recovery action.
-   `hydroweaver_research_respond` names the attention ID and current version:
-   `amend_query` records a new file revision, `continue_screening` permits only
-   eligible conditional screening, and `retry` is limited to eligible failures
-   within budget. Critical case blockers cannot be waived. A response records
-   a caller declaration; do not invent a person's answer or present it as
-   authenticated human approval.
-5. Read-only recovery uses `hydroweaver_research_list` and
-   `hydroweaver_research_status`; these do not start work. A running or unknown job
-   must be investigated, not automatically replaced. Use the existing bounded
-   job-log and manifest tools for its assignment.
-6. Return the task/job identifiers, next action, retained artifacts, limitations,
-   and scientific outcome. Audit `warn` or `fail` prevents `ready` even when its
-   job exited successfully. A ready task supports research handoff, not final
-   engineering approval. Use `hydroweaver_research_cancel` only for a requested
-   cancellation; cancelled tasks do not resume on advancement.
-
-The controller does not rebuild indexes, ingest knowledge, send external
-messages, or run benchmark campaigns automatically. Its scope declaration is
-not a security sandbox. For individual operations:
-
-1. Establish runtime/data readiness and controlled contaminant names.
-2. Call `hydroweaver_assess_case`. Report critical blockers and bundle the most
-   decision-sensitive information needs into a concise clarification.
-   While critical blockers remain, limit work to clarification or exploratory
-   retrieval. With unresolved high-priority gaps, a requested shortlist must
-   state its conditional scope and cannot demonstrate target attainment.
-3. Call `hydroweaver_retrieve_evidence` for the defined case. Check whether the
-   source-water matrix, speciation, scale, operating conditions, and residuals
-   handling match the intended application; a relevance score is not this check.
-4. Run `hydroweaver_recommend`, preserving the result path and run manifest.
-5. Run `hydroweaver_optimize_trains` on the recommended trains to close the
-   loop: the critic revises failing chains, a stalled round regenerates
-   candidates through the planner with a revision directive, and the record
-   states `feasible`, `stalled`, or `budget_exhausted`. Report the round trace,
-   unresolved violations, and final trains; never restate a stalled or
-   budget-exhausted loop as feasible.
-6. Call `hydroweaver_audit_report` on that saved result. Read the JSON `status`
-   and issue list: successful execution of the audit job does not mean that
-   the scientific audit passed. An empty recommendation set, an unknown
-   constraint state, or malformed citations cannot substantiate a recommendation.
-7. Hand off the case, evidence, candidate trains, constraint revisions,
-   optimization rounds, unresolved issues, uncertainty, job/output identifiers,
-   and manifest hashes.
-
-Keep the output at technology-screening level unless an independently
-validated design basis supports additional calculations. Missing flow,
-contact-time, dose, loading, residuals, or operating data cannot be replaced
-with an invented engineering value. Treat an upstream rule pass as the result
-of the implemented checks only.
-
-## Choosing the right tool
-
-- `hydroweaver_research_create`, `hydroweaver_research_status`,
-  `hydroweaver_research_list`, `hydroweaver_research_advance`,
-  `hydroweaver_research_respond`, `hydroweaver_research_cancel` — manage a persistent
-  case-to-report workflow with version checks, information gates, job budgets,
-  and separate execution/scientific outcomes.
-- `hydroweaver_status` — inspect the checkout, Python runtime, dependencies,
-  knowledge assets, indexes, and optional OpenRouter setup.
-- `hydroweaver_catalog` — browse/search canonical contaminants and treatment units.
-- `hydroweaver_normalize_query` — run the parser and taxonomy normalization only.
-- `hydroweaver_assess_case` — build a machine-readable case state and a deterministic
-  readiness audit with critical blockers and prioritized next-information actions.
-  It is a screening checklist, not a calibrated risk or success probability.
-- `hydroweaver_retrieve_evidence` — retrieve unit-level and case-level evidence
-  without asking the planner to produce final recommendations.
-- `hydroweaver_recommend` — run the complete five-agent pipeline and write a result
-  JSON file.
-- `hydroweaver_optimize_trains` — run the closed-loop optimization over candidate
-  trains: critique, keep auto-revisions, regenerate through the planner with a
-  revision directive on stall, and stop at `feasible`, `stalled`, or
-  `budget_exhausted`.
-- `hydroweaver_simulate_train` — build a candidate train as a WaterTAP/IDAES
-  flowsheet and solve it with IPOPT (needs the optional simulation backend:
-  `HYDROWEAVER_SIM_PYTHON`). It reports salinity-driven hydraulics and energy
-  (recovery, pressure, power, membrane area), never trace-contaminant
-  rejection; units without a mechanistic model come back as `unsupported`.
-- `hydroweaver_check_constraints` — apply taxonomy, drinking-water disinfection,
-  brine-disposal, and energy rules to supplied candidate trains.
-- `hydroweaver_build_indexes` — replace generated BM25/corpus indexes from the
-  canonical downloaded knowledge assets.
-- `hydroweaver_ingest_knowledge` — stage a `kb_unit` or `kb_case` record. OpenAqua
-  v1 preserves staged records under `data/ingest`; its stock index builder does
-  not automatically merge them into canonical data sources.
-- `hydroweaver_evaluate_trains` — score treatment-train predictions with WContBench
-  precision, recall, F1, coverage, hit rate, and case-level acceptability.
-- `hydroweaver_evaluate_retrieval` — score retrieval predictions at requested k.
-- `hydroweaver_audit_report` — create a versioned claim–evidence ledger and check
-  citation structure, declared support types, failed constraints, uncertainty,
-  and selected quantitative-claim signals. It does not test semantic entailment
-  or establish source quality, performance, safety, or compliance.
-
-## Run at the right scale
-
-Use four explicit gates:
-
-1. **Readiness** — status is healthy; dependencies, processed data, and indexes
-   are available.
-2. **Normalization and case assessment** — one representative query maps to the
-   expected source, contaminant taxonomy, targets, and constraints; critical
-   information gaps are resolved before recommendation, and eligible remaining
-   gaps are recorded as conditional screening limitations.
-3. **Smoke case** — one complete recommendation or retrieval run produces a
-   readable result and traceable evidence.
-4. **Evaluation/campaign** — only after the smoke case, run a declared benchmark
-   subset or repeated comparison. Load `hydroweaver-campaign` for this stage.
-
-A healthy adapter alone does not imply that the knowledge assets are present.
-An index with zero chunks is not a successful knowledge build.
-
-## Monitoring durable jobs
-
-Recommendation, retrieval, indexing, ingestion, and evaluations run as durable
-jobs.
-
-- Use `wait: true` only for bounded work likely to finish inside
-  `waitTimeoutMs`; otherwise return the `jobId`.
-- Recover detached work with `hydroweaver_job_list`.
-- Use `hydroweaver_job_status` for lifecycle state and timing.
-- Use `hydroweaver_job_manifest` before comparing or handing off a run. It records
-  validated parameters, the backend command and adapter-reported revision,
-  runtime identity, non-secret effective scientific settings, input hashes,
-  inline-payload hashes, and `requestSha256`.
-  After completion it also records `result.resultSha256` for the configured
-  output when that path can be captured.
-- A matching request fingerprint does **not** prove identical OpenRouter
-  responses or engineering outcomes. Compare the result fingerprint, preserve
-  the actual result files, and retain dataset/index/model identities separately.
-- Use bounded `hydroweaver_job_log` tails or `errors`/`events` views; do not
-  busy-poll or paste full logs into the conversation.
-- Use `hydroweaver_job_artifacts` for bounded output metadata. Symbolic links are
-  reported but never followed.
-- On failure, report the job ID, failed stage, concise evidence, and one bounded
-  recovery step. Do not create an automatic retry loop.
-
-## Interpreting results
-
-For each recommended train, report:
-
-- ordered unit operations and canonical names;
-- decomposed rank score (coverage, constraint, evidence, risk penalty);
-- retrieved evidence and whether each claim is evidence-backed, inference, or
-  assumption;
-- constraint status, auto-revisions, and dropped alternatives;
-- missing query fields, assumptions, risks, and uncertainty;
-- job ID, output path, backend revision, and dataset/index context when known.
-
-Do not state removal efficiency, finished-water compliance, cost, footprint,
-energy demand, residuals handling, or operability unless the supplied evidence
-supports the specific claim. A taxonomy-valid train can still be technically,
-economically, or regulatorily unsuitable.
+- **Readiness & Taxonomy**: `hydroweaver_status`, `hydroweaver_catalog`,
+  `hydroweaver_normalize_query`, `hydroweaver_assess_case`.
+- **Evidence & Knowledge Staging**: `hydroweaver_retrieve_evidence`,
+  `hydroweaver_build_indexes`, `hydroweaver_ingest_knowledge`.
+- **Joint Design & Simulation**:
+  - `hydroweaver_check_constraints`: simulate candidates and diagnose
+    `water_quality`, `resource`, `cost`, and `integrity` violations.
+  - `hydroweaver_optimize_trains`: run closed-loop configuration generation,
+    bounded coordinate + Hooke–Jeeves parameter refinement, mechanistic
+    simulation, violation-driven `refine_parameters` / `revise_structure`
+    routing, and `SharedDesignHistory` within a declared `maxSimCalls` budget.
+  - `hydroweaver_simulate_train`: optional WaterTAP/IDAES/Pyomo/IPOPT NaCl
+    flowsheet solve (`optimizeDesign=true` minimizes `WaterTAPCosting.LCOW`).
+- **Audit & AquaDesignGym**:
+  - `hydroweaver_audit_report`: audit claim citations and feasibility.
+  - `hydroweaver_gym_tasks` & `hydroweaver_evaluate_gym`: inspect and run the
+    matched-budget AquaDesignGym benchmark protocol.
+- **Durable Control**: `hydroweaver_research_*` and `hydroweaver_job_*`.

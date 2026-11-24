@@ -77,7 +77,7 @@ describe('WelcomeComponent', () => {
       id: 'hydroweaver',
       productName: 'HydroWeaver',
       commandName: 'hydroweaver',
-      logo: ['<~AQUA~>', ' WEAVER'],
+      logo: ['<HYDRO>', ' WEAVER'],
       welcomeTagline: 'FROM PLAUSIBLE TO FEASIBLE',
       welcomeDescription: 'Closed-loop optimization for water-treatment train design',
       transcriptMarker: '› ',
@@ -123,9 +123,9 @@ describe('WelcomeComponent', () => {
     const state = { ...appState, model: '', sessionId: '' };
     const wide = new WelcomeComponent(state, brand).render(120).join('\n');
 
-    expect(wide).toContain('____');
+    expect(wide).toContain('H Y D R O');
     expect(wide).toContain('FROM PLAUSIBLE TO FEASIBLE');
-    expect(wide).toContain('PARSE  ::  RETRIEVE  ::  PLAN  ::  CRITIQUE  ::  OPTIMIZE');
+    expect(wide).toContain('GENERATE  ::  OPTIMIZE  ::  SIMULATE  ::  REVISE');
     expect(wide).toContain('<====[ H Y D R O W E A V E R ]====>');
     expect(wide).toContain('NOT CONFIGURED');
     expect(wide).toContain('Starts with your first message');

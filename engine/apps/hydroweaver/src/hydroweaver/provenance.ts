@@ -14,7 +14,7 @@ import process from 'node:process';
 
 import { atomicWriteJson } from '../fs-utils';
 import { packageVersion, resolveUserPath } from '../paths';
-import type { OpenAquaBackend } from './backend';
+import type { HydroWeaverBackend } from './backend';
 
 export const ENGINEERING_RUN_SCHEMA_VERSION = 2;
 export const ENGINEERING_RUN_MANIFEST = 'run-manifest.json';
@@ -130,7 +130,7 @@ const NON_ENGINEERING_PARAMETERS = new Set(['wait', 'waitTimeoutMs']);
 export function createEngineeringJobRequest(input: {
   readonly toolName: string;
   readonly operation: string;
-  readonly backend: OpenAquaBackend;
+  readonly backend: HydroWeaverBackend;
   readonly backendVersion?: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly workDir: string;
@@ -208,7 +208,7 @@ export function buildEngineeringRunManifest(input: {
       resolution: 'requested-only',
       values: input.request.requestedParameters,
       note:
-        'These are the validated MCP request values. Preserve the OpenAqua checkout revision, downloaded dataset snapshot, generated indexes, model configuration, and backend-emitted result JSON before treating a workflow as frozen.',
+        'These are the validated MCP request values. Preserve the HydroWeaver engine version, simulation configuration, knowledge index snapshot, and backend-emitted result JSON before treating a workflow as frozen.',
     },
     inputs: input.request.inputs,
     payloads: input.request.payloads,
@@ -294,10 +294,8 @@ function collectInputReferences(
     case 'hydroweaver_ingest_knowledge':
       add('knowledge-record', 'dataFile');
       break;
-    case 'hydroweaver_evaluate_trains':
-    case 'hydroweaver_evaluate_retrieval':
+    case 'hydroweaver_evaluate_gym':
       add('benchmark', 'benchmarkDir');
-      add('predictions', 'predictions');
       break;
     case 'hydroweaver_audit_report':
       add('recommendation-report', 'reportFile');

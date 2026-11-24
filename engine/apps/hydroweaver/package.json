@@ -1,9 +1,9 @@
 {
   "name": "hydroweaver",
-  "version": "0.2.0-beta.1",
+  "version": "0.3.0-beta.1",
   "private": true,
   "displayName": "HydroWeaver",
-  "description": "HydroWeaver — agentic early-stage water-treatment train design, evidence retrieval, constraint critique, and WContBench evaluation on the Kimi Code engine",
+  "description": "HydroWeaver — agentic closed-loop water treatment train optimization, AquaDesignGym benchmarking, and optional WaterTAP simulation on the Kimi Code engine",
   "license": "MIT",
   "type": "module",
   "bin": {

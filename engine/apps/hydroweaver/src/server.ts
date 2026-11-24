@@ -6,8 +6,8 @@ import process from 'node:process';
 import { startServer } from '@moonshot-ai/kap-server';
 
 import { ASCII_LOGO } from './banner';
-import { createOpenAquaHarness, ensureOpenAquaSkillDirs, resolveOpenAquaHome } from './harness';
-import { ensureOpenAquaMcpJson } from './mcp/register';
+import { createHydroWeaverHarness, ensureHydroWeaverSkillDirs, resolveHydroWeaverHome } from './harness';
+import { ensureHydroWeaverMcpJson } from './mcp/register';
 import { defaultWebAssetsDir, packageVersion, resolveUserPath } from './paths';
 
 export interface WebOptions {
@@ -17,9 +17,10 @@ export interface WebOptions {
   readonly homeDir?: string;
 }
 
-const REPLY_STYLE_GUIDE = `You are the HydroWeaver agent: an AI copilot for early-stage water-treatment engineering research.
+const REPLY_STYLE_GUIDE = `You are the HydroWeaver agent: an AI copilot for agentic closed-loop water-treatment train design.
 Prefer the hydroweaver_* MCP tools for taxonomy lookup, query normalization, hybrid evidence retrieval,
-treatment-train recommendation, rule-based critique, knowledge staging, and WContBench evaluation.
+treatment-train configuration generation, numerical parameter optimization, process simulation,
+constraint-violation diagnosis, structural vs. parametric revision, knowledge staging, and AquaDesignGym evaluation.
 For a complete case-to-report request, use the hydroweaver skill and the durable research controller.
 Write the declared case to a snake_case UserQuery JSON file, then call hydroweaver_research_create with
 a stable requestId, the research objective, and a bounded job budget. Creation starts no backend work.
@@ -59,7 +60,7 @@ artifacts, completion states, or metrics. State the need for expert and applicab
 treatability testing, pilot testing, and site-specific design before implementation.`;
 
 export async function runWeb(options: WebOptions): Promise<void> {
-  const homeDir = resolveUserPath(options.homeDir ?? resolveOpenAquaHome());
+  const homeDir = resolveUserPath(options.homeDir ?? resolveHydroWeaverHome());
   const host = validateHost(options.host ?? '127.0.0.1');
   const port = validatePort(options.port ?? 58_627);
   const webAssetsDir = resolveUserPath(
@@ -71,10 +72,10 @@ export async function runWeb(options: WebOptions): Promise<void> {
     );
   }
 
-  const mcpJsonPath = ensureOpenAquaMcpJson(homeDir);
-  const harness = createOpenAquaHarness(homeDir);
+  const mcpJsonPath = ensureHydroWeaverMcpJson(homeDir);
+  const harness = createHydroWeaverHarness(homeDir);
   try {
-    await ensureOpenAquaSkillDirs(harness);
+    await ensureHydroWeaverSkillDirs(harness);
   } finally {
     await harness.close();
   }

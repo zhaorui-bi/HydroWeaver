@@ -73,6 +73,9 @@ jobs:
           cp -R engine/apps/hydroweaver/dist "$stage/harness/dist"
           cp -R engine/apps/hydroweaver/skills "$stage/harness/skills"
           cp -R engine/apps/hydroweaver/backend "$stage/harness/backend"
+          cp -R engine/apps/hydroweaver/hydroweaver_py "$stage/harness/hydroweaver_py"
+          cp -R engine/apps/hydroweaver/aquadesigngym "$stage/harness/aquadesigngym"
+          cp -R engine/apps/hydroweaver/sim "$stage/harness/sim"
           cp -R engine/apps/hydroweaver/web-ui "$stage/harness/web-ui"
           (
             cd "$stage"
@@ -92,6 +95,8 @@ jobs:
           assert.ok(logTool.parameters.includes('cursor'));
           assert.ok(logTool.parameters.includes('view'));
           assert.ok(catalog.tools.some((tool) => tool.name === 'hydroweaver_optimize_trains'));
+          assert.ok(catalog.tools.some((tool) => tool.name === 'hydroweaver_gym_tasks'));
+          assert.ok(catalog.tools.some((tool) => tool.name === 'hydroweaver_evaluate_gym'));
           assert.ok(catalog.tools.some((tool) => tool.name === 'hydroweaver_assess_case'));
           assert.ok(catalog.tools.some((tool) => tool.name === 'hydroweaver_audit_report'));
           assert.ok(catalog.tools.some((tool) => tool.name === 'hydroweaver_job_list'));
@@ -107,6 +112,9 @@ jobs:
           test -f "$stage/harness/skills/hydroweaver/SKILL.md"
           test -f "$stage/harness/skills/hydroweaver-campaign/SKILL.md"
           test -f "$stage/harness/backend/hydroweaver_cli.py"
+          test -f "$stage/harness/hydroweaver_py/harness.py"
+          test -f "$stage/harness/aquadesigngym/env.py"
+          test -f "$stage/harness/sim/runner.py"
           node engine/apps/hydroweaver/scripts/smoke-mcp.mjs "$stage/harness/dist/mcp-server.mjs"
           node engine/apps/hydroweaver/scripts/smoke-research.mjs "$stage/harness/dist/cli.mjs"
           node engine/apps/hydroweaver/scripts/smoke-web.mjs \

@@ -22,7 +22,7 @@ const transport = new StdioClientTransport({
     HYDROWEAVER_JOBS_DIR: path.join(scratch, 'jobs'),
     HYDROWEAVER_WORKDIR: scratch,
     HYDROWEAVER_COMMAND: '',
-    HYDROWEAVER_REPO: '',
+    HYDROWEAVER_PYTHON: '',
   },
 });
 const client = new Client({ name: 'hydroweaver-mcp-smoke', version: '1.0.0' });

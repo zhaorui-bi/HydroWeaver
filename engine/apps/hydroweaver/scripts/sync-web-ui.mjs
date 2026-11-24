@@ -73,15 +73,15 @@ const TEXT_REPLACEMENTS = [
     '描述你的水处理场景 — 进水水质、目标、约束条件…',
   ],
   ['输入消息…', '描述你的水处理场景 — 进水、目标、约束…'],
-  // About page: turn the app-version hint row into an in-product citation of
-  // the OpenAqua paper (persistent surface; the welcome panel also cites it).
+  // About page: turn the app-version hint row into an in-product description
+  // of HydroWeaver's closed-loop optimizer and AquaDesignGym benchmark.
   [
     'The running app’s version',
-    'Built on OpenAqua (Liu et al., Water Research 308 (2027) 126761, doi:10.1016/j.watres.2026.126761). Cite the paper plus the exact software, dataset, and model versions used.',
+    'HydroWeaver closed-loop agentic optimizer with AquaDesignGym & optional WaterTAP simulation. Cite software version and engine configuration used.',
   ],
   [
     '当前应用的版本号',
-    '基于 OpenAqua 构建（Liu 等，Water Research 308 (2027) 126761，doi:10.1016/j.watres.2026.126761）。引用时请同时注明实际使用的软件、数据集与模型版本。',
+    'HydroWeaver 智能体闭环优化框架，集成 AquaDesignGym 基准测试与可选 WaterTAP 模拟。引用时请同时注明软件版本与所用的求解配置。',
   ],
   // First-run welcome addon: loaded right after boot.js so it is present
   // before the bundle mounts the empty chat state.
@@ -597,13 +597,13 @@ function assertBrandContract() {
     throw new Error('Branding contract failed: research-flavored composer placeholder is missing');
   }
   if (
-    !javascript.includes('Built on OpenAqua') ||
-    !javascript.includes('基于 OpenAqua 构建')
+    !javascript.includes('HydroWeaver closed-loop agentic optimizer') ||
+    !javascript.includes('HydroWeaver 智能体闭环优化框架')
   ) {
-    throw new Error('Branding contract failed: About-page OpenAqua citation is missing');
+    throw new Error('Branding contract failed: About-page HydroWeaver description is missing');
   }
   const kimiProviderIconCount = javascript.split('<title>Kimi</title>').length - 1;
-  if (kimiProviderIconCount !== 1 || javascript.includes('<title>OpenAqua</title>')) {
+  if (kimiProviderIconCount !== 1) {
     throw new Error('Branding contract failed: Kimi provider icon was not preserved');
   }
   if (javascript.includes('Kimi For Coding') || javascript.includes('月之暗面')) {

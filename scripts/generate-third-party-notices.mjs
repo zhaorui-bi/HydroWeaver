@@ -87,15 +87,6 @@ mergePackage({
   notices: [readNotice(path.join(root, 'engine', 'LICENSE'))],
 });
 
-mergePackage({
-  name: 'OpenAqua (external backend compatibility target and brand assets)',
-  version: '0e39908',
-  license: 'MIT',
-  author: 'ElijahMoulton and OpenAqua contributors',
-  homepage: 'https://github.com/zhaorui-bi/OpenAqua',
-  notices: [readNotice(path.join(root, 'licenses', 'OpenAqua-MIT.txt'))],
-});
-
 const content = renderNotices([...packages.values()]);
 if (checkOnly) {
   const committed = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '';
@@ -177,7 +168,7 @@ function renderNotices(records) {
     '',
     '# Third-party notices',
     '',
-    'HydroWeaver bundles the open-source Kimi Code engine, OpenAqua-derived brand assets,',
+    'HydroWeaver bundles the open-source Kimi Code engine, its standalone Python design/simulation/AquaDesignGym modules,',
     'its production dependency graph, Electron, and self-hosted fonts. This file records package metadata and license or notice',
     'texts available in the installed dependency trees at build time.',
     '',

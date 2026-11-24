@@ -4,14 +4,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-import { packageVersion, resolveJobStores, resolveOpenAquaHome } from '../paths';
+import { packageVersion, resolveJobStores, resolveHydroWeaverHome } from '../paths';
 import {
-  openAquaToolAnnotations,
+  hydroWeaverToolAnnotations,
   HYDROWEAVER_TOOLS,
   type ToolContext,
 } from '../hydroweaver/tools';
 
-const homeDir = resolveOpenAquaHome();
+const homeDir = resolveHydroWeaverHome();
 const stores = resolveJobStores();
 
 const ctx: ToolContext = {
@@ -33,7 +33,7 @@ for (const tool of HYDROWEAVER_TOOLS) {
       title: tool.title,
       description: tool.description,
       inputSchema,
-      annotations: openAquaToolAnnotations(tool.name),
+      annotations: hydroWeaverToolAnnotations(tool.name),
     },
     async (args) => tool.run(args as Record<string, unknown>, ctx),
   );

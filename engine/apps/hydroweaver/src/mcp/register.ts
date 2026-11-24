@@ -35,18 +35,10 @@ export function mcpEnvironment(
   const result: Record<string, string> = { HYDROWEAVER_HOME: homeDir };
   copyEnvironmentValue(result, env, 'ELECTRON_RUN_AS_NODE');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_COMMAND');
-  copyEnvironmentValue(result, env, 'HYDROWEAVER_REPO');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_PYTHON');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_WORKDIR');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_JOBS_DIR');
   copyEnvironmentValue(result, env, 'HYDROWEAVER_SIM_PYTHON');
-  copyEnvironmentValue(result, env, 'HYDROWEAVER_OPENROUTER_MODEL');
-  copyEnvironmentValue(result, env, 'HYDROWEAVER_DEFAULT_MODEL');
-  copyEnvironmentValue(result, env, 'HYDROWEAVER_PLANNER_MODEL');
-  copyEnvironmentValue(result, env, 'HYDROWEAVER_EXPLANATION_MODEL');
-  copyEnvironmentValue(result, env, 'OPENROUTER_API_KEY');
-  copyEnvironmentValue(result, env, 'HF_HOME');
-  copyEnvironmentValue(result, env, 'HUGGINGFACE_HUB_CACHE');
   return result;
 }
 
@@ -63,7 +55,7 @@ export function mcpServerConfig(
   };
 }
 
-export function ensureOpenAquaMcpJson(homeDir: string): string {
+export function ensureHydroWeaverMcpJson(homeDir: string): string {
   const filePath = path.join(homeDir, 'mcp.json');
   const data = readMcpConfig(filePath);
   const existingServers = data['mcpServers'];

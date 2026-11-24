@@ -1,219 +1,92 @@
-# Engineering workflow discipline
+# Scientific Workflows & AquaDesignGym Protocol
 
-HydroWeaver is an execution and interaction layer around OpenAqua. It
-helps make early-stage water-treatment studies traceable; it does not turn
-retrieval, rules, or model output into a field-ready design.
+[简体中文](./zh-CN/DOMAIN_WORKFLOW.md) | **English**
 
-## Operating model
+HydroWeaver treats water-treatment process synthesis as a closed-loop joint
+optimization problem over **discrete unit topologies** and **continuous
+operating parameters**, audited for semantic fidelity and reproducibility.
 
-Advance long-running work through explicit gates:
+## 1. End-to-End Case Workflow
 
-```text
-readiness → query smoke → end-to-end smoke → bounded pilot → approved study → review/handoff
-```
+1. **Ready & Taxonomy Check**: Inspect engine health and verify canonical unit
+   and contaminant identifiers via `hydroweaver_status` and `hydroweaver_catalog`.
+2. **Case Assessment & Semantic Preservation (`hydroweaver_assess_case`)**:
+   Preserve explicit measurement bases (`nitrate_basis: as NO3 vs. as N`,
+   `hardness_basis: as CaCO3`, `arsenic_speciation: As(III) vs. As(V)`), design
+   flow, and site resource limits (`brine_disposal`, `max_sec_kwh_m3`,
+   `max_lcow_usd_m3`). Flag `blocked` or `needs_information` items clearly.
+3. **Evidence Retrieval (`hydroweaver_retrieve_evidence`)**: Retrieve hybrid
+   lexical + structured evidence chunks from HydroWeaver’s unit/template
+   knowledge corpus and any locally staged `kb_unit` / `kb_case` records under
+   `HYDROWEAVER_HOME/ingest`.
+4. **Joint Closed-Loop Optimization (`hydroweaver_optimize_trains`)**:
+   Coordinates:
+   - knowledge-informed configuration priors,
+   - bounded coordinate + Hooke–Jeeves parameter refinement (`refine_parameters`),
+   - mechanistic + LCOW process simulation,
+   - simulation-feedback violation diagnosis (`revise_structure` via add,
+     remove, replace, reorder when structural blockers exist),
+   - `SharedDesignHistory` cycle avoidance within `maxSimCalls`.
+5. **Optional Flowsheet NLP (`hydroweaver_simulate_train`)**: When
+   `HYDROWEAVER_SIM_PYTHON` is configured, validate hydraulics/costing or solve
+   an IPOPT NLP minimizing LCOW (`optimizeDesign=true`).
+6. **Audit & Research Handoff (`hydroweaver_audit_report`, `hydroweaver_job_manifest`)**:
+   Audit evidence bindings, constraint feasibility, and SHA-256 run provenance.
 
-| Stage | Purpose | Minimum evidence before advancing |
+## 2. AquaDesignGym Benchmark Environment
+
+AquaDesignGym (`engine/apps/hydroweaver/aquadesigngym/`) couples 12 standardized
+design tasks with an interactive transition API (`AquaDesignGymEnv`) and a
+strict simulation-call budget (`max_sim_calls`):
+
+### Tasks (`ADG-01` through `ADG-12`)
+
+- **Groundwater & Trace Contaminants**: `ADG-01-AS-RURAL` (As(III), rural
+  constraints, no brine), `ADG-02-AS-NO3-ZERO-BRINE`, `ADG-03-NITRATE-SMALL`,
+  `ADG-07-PFAS-TRACE` (PFAS/trace organics), `ADG-11-VOC-AIR`.
+- **High-Salinity, Reuse & Scaling**: `ADG-04-BWRO-SCALING` (brackish RO with
+  high hardness/silica scaling), `ADG-05-INDUSTRIAL-REUSE` (RO/NF cooling makeup,
+  zero-brine/concentrator constraint), `ADG-06-HIGH-FOULING-SW` (high-turbidity
+  surface water), `ADG-10-SEAWATER-RO` (high-salinity SWRO + energy cap).
+- **Disinfection & Multi-Contaminant Surface Water**: `ADG-08-DBP-SURFACE`
+  (NOM/DBP risk), `ADG-09-PATHOGEN-CHEMFREE` (chemical-free disinfection),
+  `ADG-12-MULTI-CONTAM` (As(III) + hardness + NOM + PFAS + pathogen).
+
+### Admissible Action Space (9 Actions)
+
+| Action | Category | Semantics |
 | --- | --- | --- |
-| Readiness | Verify code, Python dependencies, processed knowledge, indexes, paths, and model configuration. | `hydroweaver_status` is interpretable; required data exist; indexes are non-empty. |
-| Query smoke | Verify units, taxonomy normalization, targets, constraints, and case-state readiness. | A representative query normalizes as intended without silent unit changes; `hydroweaver_assess_case` exposes unresolved critical or high-priority information needs. |
-| End-to-end smoke | Exercise retrieval, planning, critique, explanation, and output persistence. | One case produces a readable result with evidence, assumptions, uncertainty, and a durable manifest. |
-| Pilot | Estimate completion rate, latency, schema failures, evidence coverage, and model variability. | Recurring failures are diagnosed and the proposed study budget is justified. |
-| Approved study | Run the frozen comparison or WContBench subset in bounded batches. | Each branch has stable identity, complete denominators, and recoverable outputs. |
-| Review/handoff | Make the engineering decision auditable. | Manifest, predictions, metrics, failures, evidence context, deviations, and limitations are present. |
+| `set_chain` | Structural | Replace the unit sequence with a canonicalized train. |
+| `add_unit` | Structural | Insert a treatment unit at stage order or specified index. |
+| `remove_unit` | Structural | Remove a redundant or mismatched unit. |
+| `replace_unit` | Structural | Swap a conflicting unit for an admissible alternative. |
+| `reorder_chain` | Structural | Reorder units according to physical stage order. |
+| `set_parameters` | Parametric | Assign operating variables on specific units. |
+| `refine_parameters` | Optimization | Invoke bounded Hooke–Jeeves parameter search under a sub-budget. |
+| `step_simulate` | Evaluation | Evaluate the active train and parameters (consumes 1 oracle call). |
+| `stop` | Termination | Terminate the episode and lock final episode metrics. |
 
-A successful adapter probe is not data readiness. A successful index command
-that produces zero chunks is not a successful retrieval setup.
+### Comparative Protocol
 
-For a complete single-case workflow, use a [durable research task](./RESEARCH_TASKS.md).
-It persists the case, stage assignments, information needs, and scientific
-outcome across sessions. The research runner enforces its case and report
-gates; the individual operation tools remain available for bounded manual
-work. A task marked `ready` is ready for research handoff, not for construction
-or a claim of regulatory compliance.
+Under a matched `max_sim_calls` oracle budget and seed, `evaluate_benchmark`:
 
-## Query integrity
+- evaluates **HydroWeaver** against **3 agent baselines** (`OneShotKnowledge`,
+  `RuleCriticLoop`, `ReActBlindAgent`), **3 conventional optimizers**
+  (`EvolutionaryMINLP`, `TemplateGridSearch`, `RandomSearch`), and **5 component
+  ablations** (`HW-NoParamOpt`, `HW-NoStructRev`, `HW-NoDiagRouter`,
+  `HW-NoKnowledge`, `HW-NoHistory`);
+- evaluates robustness across **nominal**, **mild_shift**, and **severe_shift**
+  influent perturbations (re-simulating synthesized policies zero-shot on drifted
+  feed water);
+- reports Feasible-Design Rate (`FDR`), mean feasible `LCOW ($/m³)`, mean
+  feasible `SEC (kWh/m³)`, Simulations-to-Feasibility (`S2F`), Area Under the
+  Feasibility–Budget Curve (`AUFBC`), and perturbation feasible retention.
 
-Record source-water context, measurements, units, contaminants, treatment
-targets, intended use, and operational constraints. Prefer structured values
-for measured data. If values are converted, preserve the original value,
-original unit, conversion equation, and converted value.
+## 3. Interpretive Boundaries
 
-Do not silently infer:
-
-- concentration units;
-- whether a target is an influent or effluent value;
-- whether water is intended for drinking;
-- availability of brine disposal, chemicals, energy, or skilled operators;
-- applicable regulatory standards.
-
-Natural-language parsing can fill gaps when OpenRouter is configured, but those
-fields remain model-extracted assumptions until reviewed. `hydroweaver_assess_case`
-provides a deterministic screening checklist for missing information; its
-readiness status is not a calibrated probability of success, safety, or
-compliance.
-
-Declare nitrate mass bases independently in
-`water_quality.extra.nitrate_basis` and
-`treatment_targets.extra.nitrate_basis` (`as NO3` or `as N`). Missing,
-unrecognized, or inconsistent bases require clarification; the case audit
-never converts values automatically. Hardness needs an explicit reporting
-basis such as `water_quality.extra.hardness_basis: "as CaCO3"`. Retain lead
-endpoints in `treatment_targets.extra.lead_ug_L`, measured arsenic speciation
-in `water_quality.extra.arsenic_speciation`, and known design flow in
-`constraints.extra.design_flow_m3_day`.
-
-Extension fields retained by the adapter remain declared case context, not
-proof of constraints enforced by the upstream planner or critic. Inspect
-`context_preservation` and preserve the unresolved conditions in the handoff.
-A screening-ready case and a supplied flow do not establish process-sizing
-readiness. The [domain workflow](./zh-CN/DOMAIN_WORKFLOW.md) includes synthetic
-cases demonstrating screening, missing reporting bases, and blocked context.
-
-## From plausible to feasible: the closed-loop contract
-
-A plausible recommendation reads well and still violates site constraints. The
-closed loop converts plausibility into declared-constraint feasibility:
-
-1. **Generate** — the planner proposes trains, or the caller supplies candidates.
-2. **Critique** — the constraint critic reports per-chain status and violations
-   and may auto-revise a chain in place.
-3. **Revise or regenerate** — a critic revision is re-checked in the next round;
-   when a round makes no progress, the planner regenerates candidates with a
-   structured revision directive naming the failing chains and their violations.
-4. **Converge or declare** — the loop stops at `feasible`, `stalled`, or
-   `budget_exhausted`, and the record states which, with the full round trace.
-
-Preserve every round's constraint report and the final feasible trains with the
-run manifest. A chain without a machine-readable constraint report is unresolved,
-never feasible. Feasibility here means the declared rules did not reject the
-chain; it does not establish performance, target attainment, safety, or
-regulatory compliance.
-
-## Evidence and recommendation contract
-
-Keep three evidence classes separate:
-1. **Retrieved evidence** — unit-level or case-level chunks returned by the
-   OpenAqua retriever.
-2. **Rule results** — taxonomy, disinfection, brine, energy, and other checks
-   implemented in OpenAqua.
-3. **Model synthesis** — proposed chains, rationale, and explanatory text.
-
-A cited case can support plausibility but does not prove transferability to a
-new source water. A rule pass means only that the implemented rule did not
-reject the chain. A high rank score is not a probability of success.
-
-Reports should preserve ordered unit operations, decomposed scores, citations,
-constraint revisions, dropped alternatives, assumptions, risks, and
-uncertainty. Unsupported quantitative performance claims must be omitted.
-`hydroweaver_audit_report` can enforce this contract structurally and produce a
-claim–evidence ledger, but its checks do not establish semantic entailment or
-source quality.
-
-Audit the saved recommendation before handoff. Inspect the scientific
-`status` inside the audit artifact independently of job execution success.
-An empty recommendation set cannot pass; missing or unknown constraint
-states fail, while upstream `WARNING` and `N/A` states require review.
-These checks preserve the upstream status vocabulary and do not turn a
-structurally complete citation into verified engineering evidence.
-
-## Machine-readable run provenance
-
-Durable operations write a private, schema-versioned `run-manifest.json`. It
-preserves:
-
-- validated tool and operation;
-- requested parameters (excluding wait controls);
-- backend source, command, and adapter-reported version/revision when available;
-- HydroWeaver/Node/platform identity;
-- adapter-reported model, retrieval, and planning settings plus explicit non-secret environment overrides;
-- regular-file input paths, sizes, timestamps, and SHA-256 hashes;
-- inline query/candidate JSON byte counts and SHA-256 hashes;
-- configured output path;
-- stable request fingerprint;
-- completion-time output content fingerprint and completeness state.
-
-Inspect it with `hydroweaver_job_manifest`.
-
-The request and result identities are separate. Schema version 2 recursively
-fingerprints benchmark inputs and configured outputs within explicit entry and
-byte limits, reports whether each tree hash is complete, and never follows
-symbolic links. It still cannot freeze remote model behavior or replace an
-immutable dataset release. A reproducible study must also preserve:
-
-- OpenAqua Git commit/release;
-- Hugging Face dataset revision or an external checksum inventory;
-- processed knowledge files and generated indexes;
-- OpenRouter provider-side model revision or behavior changes that cannot be frozen by a local identifier;
-- prediction/result JSON;
-- evaluator code revision;
-- any manual curation applied to staged knowledge.
-
-## Fair WContBench evaluation
-
-For comparable branches:
-
-- use the same benchmark files and split;
-- use the same `top_k`, normalization policy, and evaluator revision;
-- freeze the knowledge/index snapshot;
-- freeze or explicitly vary model settings;
-- include missing predictions and failed cases in denominators;
-- report per-split and aggregate metrics;
-- preserve case-level details, not only averages;
-- avoid tuning on the same test split presented as final evaluation;
-- use repeated runs when remote-model variability is part of the question.
-
-Treatment-train metrics (precision, recall, F1, coverage, hit rate, and CLA) and
-retrieval metrics (Precision@k, Recall@k, Hit@k) measure benchmark agreement.
-They do not establish process performance or compliance.
-
-## Knowledge curation boundary
-
-`hydroweaver_ingest_knowledge` stages a regular JSON object under `data/ingest` and
-can invoke index rebuilding. OpenAqua v1’s stock `IndexBuilder` reads the
-canonical unit-level TDB tree and case-level `kb_cases.json`; it does not merge
-staged records automatically.
-
-A curation workflow should therefore:
-
-1. validate source provenance and licensing;
-2. validate schema and controlled vocabulary;
-3. review technical claims and units;
-4. merge into the appropriate canonical source through a reviewed change;
-5. rebuild indexes;
-6. record the new knowledge snapshot and rerun regression cases.
-
-Do not report a staged record as active retrieval knowledge without verifying
-that it appears in the generated corpus.
-
-## Bounded observability
-
-Jobs remain discoverable after the initiating interface closes:
-
-- `hydroweaver_job_list` — recover IDs;
-- `hydroweaver_job_status` — lifecycle and timing;
-- `hydroweaver_job_manifest` — request provenance and output inventory;
-- `hydroweaver_job_log` — bounded tail, error/event filtering, or cursor traversal;
-- `hydroweaver_job_artifacts` — metadata below the explicit output path;
-- `hydroweaver_job_cancel` — bounded graceful-to-forceful cancellation.
-
-Keep raw logs on disk and quote only enough evidence to diagnose a failure.
-Avoid busy-polling remote model or evaluation jobs.
-
-## Handoff checklist
-
-A complete handoff includes:
-
-- objective, scope, and decision owner;
-- source-water inputs and unit policy;
-- OpenAqua, data, index, model, and evaluator identities;
-- job IDs and request fingerprints;
-- attempted/completed/failed/evaluable counts;
-- full prediction/result files and metric tables;
-- evidence and constraint summaries;
-- missing data, assumptions, uncertainty, and deviations;
-- limits on external validity;
-- required expert, regulatory, laboratory, pilot, and site-design follow-up.
-
-Use terms such as “computational recommendation,” “benchmark result,” or
-“early-stage shortlist.” Do not call a train safe, compliant, optimal, or
-field-ready without independent evidence supporting that claim.
+- A `feasible` status inside HydroWeaver’s mechanistic engine or AquaDesignGym
+  means every modeled quality, resource, and cost constraint is satisfied in
+  simulation; it is **not** a substitute for laboratory treatability studies,
+  piloting, or regulatory permitting.
+- See [cases README](../examples/cases/arsenic-groundwater.json) and
+  [WaterTAP simulation docs](./SIMULATION.md) for scope limits.

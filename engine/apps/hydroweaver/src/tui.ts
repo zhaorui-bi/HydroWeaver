@@ -4,11 +4,11 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
-  createOpenAquaHarness,
-  ensureOpenAquaSkillDirs,
-  resolveOpenAquaHome,
+  createHydroWeaverHarness,
+  ensureHydroWeaverSkillDirs,
+  resolveHydroWeaverHome,
 } from './harness';
-import { ensureOpenAquaMcpJson } from './mcp/register';
+import { ensureHydroWeaverMcpJson } from './mcp/register';
 import { monorepoRoot, packageVersion, resolveUserPath } from './paths';
 
 export function resolveTuiEntry(): string | undefined {
@@ -16,7 +16,7 @@ export function resolveTuiEntry(): string | undefined {
   return existsSync(bundled) ? bundled : undefined;
 }
 
-export function openAquaTuiEnvironment(
+export function hydroWeaverTuiEnvironment(
   homeDir: string,
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -31,15 +31,15 @@ export function openAquaTuiEnvironment(
   };
 }
 
-export async function launchTui(homeDir: string = resolveOpenAquaHome()): Promise<number> {
+export async function launchTui(homeDir: string = resolveHydroWeaverHome()): Promise<number> {
   const resolvedHomeDir = resolveUserPath(homeDir);
   const entry = resolveTuiEntry();
   if (entry === undefined) return -1;
 
-  ensureOpenAquaMcpJson(resolvedHomeDir);
-  const harness = createOpenAquaHarness(resolvedHomeDir);
+  ensureHydroWeaverMcpJson(resolvedHomeDir);
+  const harness = createHydroWeaverHarness(resolvedHomeDir);
   try {
-    await ensureOpenAquaSkillDirs(harness);
+    await ensureHydroWeaverSkillDirs(harness);
   } finally {
     await harness.close();
   }
@@ -53,7 +53,7 @@ export async function launchTui(homeDir: string = resolveOpenAquaHome()): Promis
     };
     const child = spawn(process.execPath, [entry], {
       stdio: 'inherit',
-      env: openAquaTuiEnvironment(resolvedHomeDir),
+      env: hydroWeaverTuiEnvironment(resolvedHomeDir),
     });
     child.once('close', (code) => {
       finish(code ?? 0);
