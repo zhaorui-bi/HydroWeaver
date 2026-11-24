@@ -22,10 +22,6 @@
   <img src="https://img.shields.io/badge/Python-%E2%89%A53.10-2777b8" alt="Python 3.10 or newer">
 </p>
 
-<p align="center">
-  <img src="./assets/framework_web.png" width="92%" alt="HydroWeaver closed-loop framework">
-</p>
-
 ---
 
 ## What is HydroWeaver?

@@ -22,10 +22,6 @@
   <img src="https://img.shields.io/badge/Python-%E2%89%A53.10-2777b8" alt="Python 3.10 或更高">
 </p>
 
-<p align="center">
-  <img src="./assets/framework_web.png" width="92%" alt="HydroWeaver 闭环框架">
-</p>
-
 ---
 
 ## HydroWeaver 是什么？
