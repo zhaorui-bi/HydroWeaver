@@ -4,7 +4,7 @@ Reply in the same language as the user.
 
 This is a TypeScript monorepo built for agent-assisted development. Keep the root `AGENTS.md` limited to hot-path rules: the project map, hard constraints, and workflow requirements — things every task needs to know.
 
-This vendored copy is hosted by OpenAqua Harness. Product contribution and release workflows live in `../CONTRIBUTING.md`, `../.github/`, and `../docs/RELEASE.md`; the upstream GitHub automation is not retained here.
+This vendored copy is hosted by HydroWeaver. Product contribution and release workflows live in `../CONTRIBUTING.md`, `../.github/`, and `../docs/RELEASE.md`; the upstream GitHub automation is not retained here.
 
 ## Working Principles
 

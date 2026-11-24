@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-app.setName('openaqua-harness');
+app.setName('hydroweaver');
 
-const PRODUCT = 'OpenAqua Harness';
+const PRODUCT = 'HydroWeaver';
 const SERVER_START_TIMEOUT_MS = 90_000;
 const SERVER_STOP_GRACE_MS = 4_000;
 const DESKTOP_SMOKE_TIMEOUT_MS = 120_000;
@@ -42,7 +42,7 @@ function loadSettings() {
     return { workspaceDir: path.resolve(workspaceDir) };
   } catch (error) {
     if (error && error.code !== 'ENOENT') {
-      console.warn('[openaqua] could not read settings:', error.message);
+      console.warn('[hydroweaver] could not read settings:', error.message);
     }
     return {};
   }
@@ -71,8 +71,8 @@ function saveSettings(settings) {
 
 function aquaHomeDir() {
   const current = app.isPackaged
-    ? path.join(app.getPath('userData'), 'openaqua-data')
-    : path.join(__dirname, 'openaqua-data');
+    ? path.join(app.getPath('userData'), 'hydroweaver-data')
+    : path.join(__dirname, 'hydroweaver-data');
   if (!app.isPackaged) {
     const legacy = path.join(__dirname, 'kimi-data');
     if (!fs.existsSync(current) && fs.existsSync(legacy)) {
@@ -82,7 +82,7 @@ function aquaHomeDir() {
           fs.renameSync(legacy, current);
           renamed = true;
         } catch (error) {
-          console.warn('[openaqua] legacy data rename failed; copying regular files:', error.message);
+          console.warn('[hydroweaver] legacy data rename failed; copying regular files:', error.message);
         }
       }
       if (!renamed) {
@@ -98,7 +98,7 @@ function aquaHomeDir() {
       } else if (process.platform !== 'win32') {
         restrictPrivateTree(current);
       }
-      console.log('[openaqua] migrated kimi-data -> openaqua-data');
+      console.log('[hydroweaver] migrated kimi-data -> hydroweaver-data');
     }
   }
   fs.mkdirSync(current, { recursive: true, mode: 0o700 });
@@ -106,7 +106,7 @@ function aquaHomeDir() {
     try {
       fs.chmodSync(current, 0o700);
     } catch (error) {
-      console.warn('[openaqua] could not restrict data-directory permissions:', error.message);
+      console.warn('[hydroweaver] could not restrict data-directory permissions:', error.message);
     }
   }
   return current;
@@ -128,7 +128,7 @@ function treeContainsSymlink(source) {
 function copyRegularTree(source, destination) {
   const metadata = fs.lstatSync(source);
   if (metadata.isSymbolicLink()) {
-    console.warn('[openaqua] skipped symbolic link during legacy migration:', source);
+    console.warn('[hydroweaver] skipped symbolic link during legacy migration:', source);
     return;
   }
   if (metadata.isDirectory()) {
@@ -161,7 +161,7 @@ function restrictPrivateTree(target) {
 function engineDir(...parts) {
   const base = app.isPackaged
     ? path.join(process.resourcesPath, 'harness')
-    : path.join(__dirname, 'engine', 'apps', 'openaqua-harness');
+    : path.join(__dirname, 'engine', 'apps', 'hydroweaver');
   return path.join(base, ...parts);
 }
 
@@ -173,7 +173,7 @@ function brandMarkDataUri() {
   try {
     brandMarkDataUriCache = `data:image/png;base64,${fs.readFileSync(markPath).toString('base64')}`;
   } catch (error) {
-    console.warn('[openaqua] could not load brand mark:', error.message);
+    console.warn('[hydroweaver] could not load brand mark:', error.message);
     brandMarkDataUriCache =
       'data:image/svg+xml;base64,' +
       Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M32 5C24 17 15 27 15 40a17 17 0 0 0 34 0C49 27 40 17 32 5Z" fill="#239f83"/><path d="M32 5v52a17 17 0 0 0 17-17C49 27 40 17 32 5Z" fill="#2777b8"/></svg>').toString('base64');
@@ -197,12 +197,12 @@ function augmentedPath() {
 
 function importExistingConfig(homeDir) {
   if (fs.existsSync(path.join(homeDir, 'config.toml'))) return;
-  const sourceHome = path.join(os.homedir(), '.openaqua');
+  const sourceHome = path.join(os.homedir(), '.hydroweaver');
   if (path.resolve(sourceHome) === path.resolve(homeDir)) return;
   if (!fs.existsSync(path.join(sourceHome, 'config.toml'))) return;
 
   fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
-  for (const entry of ['config.toml', 'openaqua.json']) {
+  for (const entry of ['config.toml', 'hydroweaver.json']) {
     const source = path.join(sourceHome, entry);
     const destination = path.join(homeDir, entry);
     if (isRegularFile(source) && !fs.existsSync(destination)) {
@@ -210,7 +210,7 @@ function importExistingConfig(homeDir) {
       fs.chmodSync(destination, 0o600);
     }
   }
-  console.log('[openaqua] imported config from', sourceHome);
+  console.log('[hydroweaver] imported config from', sourceHome);
 }
 
 function queueServerStart(workspaceDir) {
@@ -218,7 +218,7 @@ function queueServerStart(workspaceDir) {
   currentWorkspace = path.resolve(workspaceDir);
   serverQueue = serverQueue
     .catch((error) => {
-      console.error('[openaqua] previous server operation failed:', error);
+      console.error('[hydroweaver] previous server operation failed:', error);
     })
     .then(() => startServer(currentWorkspace, generation));
   return serverQueue;
@@ -252,7 +252,7 @@ async function startServer(cwd, generation) {
     return;
   }
 
-  console.log('[openaqua] starting web server, home =', homeDir, 'cwd =', cwd);
+  console.log('[hydroweaver] starting web server, home =', homeDir, 'cwd =', cwd);
   const child = spawn(launch.command, launch.args, {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -273,7 +273,7 @@ async function startServer(cwd, generation) {
     }
     serverUrl = trustedUrl;
     clearStartupTimer();
-    console.log('[openaqua] server ready:', redactSecrets(serverUrl));
+    console.log('[hydroweaver] server ready:', redactSecrets(serverUrl));
     void loadAppUrl(trustedUrl, generation);
   };
   const onData = (stream, data) => {
@@ -289,7 +289,7 @@ async function startServer(cwd, generation) {
     expectedServerExits.add(child);
     if (serverProc === child) serverProc = null;
     clearStartupTimer();
-    handleServerFailure('无法启动 OpenAqua 引擎', error.message, generation);
+    handleServerFailure('无法启动 HydroWeaver 引擎', error.message, generation);
   });
   child.once('exit', (code, signal) => {
     for (const buffer of Object.values(outputBuffers)) {
@@ -299,7 +299,7 @@ async function startServer(cwd, generation) {
     if (generation === serverGeneration) clearStartupTimer();
     if (isQuitting || expectedServerExits.has(child) || generation !== serverGeneration) return;
     const reason = signal ? `信号 ${signal}` : `退出码 ${String(code)}`;
-    handleServerFailure('OpenAqua 引擎已退出', `Web 服务异常退出（${reason}）。`, generation);
+    handleServerFailure('HydroWeaver 引擎已退出', `Web 服务异常退出（${reason}）。`, generation);
   });
 
   startupTimer = setTimeout(() => {
@@ -307,7 +307,7 @@ async function startServer(cwd, generation) {
     expectedServerExits.add(child);
     void stopServer();
     handleServerFailure(
-      'OpenAqua 引擎启动超时',
+      'HydroWeaver 引擎启动超时',
       `在 ${String(SERVER_START_TIMEOUT_MS / 1000)} 秒内未检测到服务地址，请查看终端日志。`,
       generation,
     );
@@ -319,13 +319,13 @@ function resolveEngineLaunch(homeDir) {
   const baseEnv = {
     ...process.env,
     PATH: augmentedPath(),
-    OPENAQUA_HOME: homeDir,
+    HYDROWEAVER_HOME: homeDir,
     ELECTRON_RUN_AS_NODE: '1',
   };
 
   if (fs.existsSync(distCli)) {
     if (app.isPackaged) {
-      baseEnv.OPENAQUA_WEB_ASSETS_DIR = path.join(process.resourcesPath, 'web-ui');
+      baseEnv.HYDROWEAVER_WEB_ASSETS_DIR = path.join(process.resourcesPath, 'web-ui');
     }
     return {
       command: process.execPath,
@@ -356,7 +356,7 @@ function resolveEngineLaunch(homeDir) {
   }
 
   return {
-    error: '未找到 OpenAqua 引擎文件，请重新安装或运行 npm run setup。',
+    error: '未找到 HydroWeaver 引擎文件，请重新安装或运行 npm run setup。',
   };
 }
 
@@ -447,7 +447,7 @@ async function verifyDesktopSmoke(url, generation) {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ query: 'OpenAqua' }),
+      body: JSON.stringify({ query: 'HydroWeaver' }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) throw new Error(`search endpoint returned HTTP ${String(response.status)}`);
@@ -502,7 +502,7 @@ function createMainWindow() {
   mainWindow.webContents.session.setPermissionCheckHandler(() => false);
   mainWindow.webContents.session.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
-      console.warn('[openaqua] denied renderer permission request:', permission);
+      console.warn('[hydroweaver] denied renderer permission request:', permission);
       callback(false);
     },
   );
@@ -512,7 +512,7 @@ function createMainWindow() {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     if (isQuitting || details.reason === 'clean-exit') return;
     handleServerFailure(
-      'OpenAqua 界面进程已退出',
+      'HydroWeaver 界面进程已退出',
       `渲染进程异常退出（${details.reason}）。请从“文件”菜单重启引擎。`,
       serverGeneration,
     );
@@ -526,7 +526,7 @@ function createMainWindow() {
   attachContextMenu(mainWindow);
   attachNavigationGuards(mainWindow);
   mainWindow.webContents.on('did-finish-load', () => {
-    console.log('[openaqua] page loaded:', mainWindow?.webContents.getTitle());
+    console.log('[hydroweaver] page loaded:', mainWindow?.webContents.getTitle());
   });
   return mainWindow;
 }
@@ -727,7 +727,7 @@ function showLoading(message) {
     // A fast server startup can supersede this temporary data URL before its
     // navigation commits. Chromium reports that expected hand-off as aborted.
     if (error && error.code === 'ERR_ABORTED') return;
-    console.error('[openaqua] failed to show loading page:', error);
+    console.error('[hydroweaver] failed to show loading page:', error);
   });
 }
 
@@ -738,7 +738,7 @@ async function loadAppUrl(url, generation) {
     if (generation === serverGeneration) loadingUrl = null;
     await verifyDesktopSmoke(url, generation);
   } catch (error) {
-    handleServerFailure('无法加载 OpenAqua 界面', error.message, generation);
+    handleServerFailure('无法加载 HydroWeaver 界面', error.message, generation);
   }
 }
 
@@ -769,12 +769,12 @@ async function openExternalUrl(candidate) {
   try {
     const url = new URL(candidate);
     if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) {
-      console.warn('[openaqua] blocked external URL protocol:', url.protocol);
+      console.warn('[hydroweaver] blocked external URL protocol:', url.protocol);
       return;
     }
     await shell.openExternal(url.href);
   } catch (error) {
-    console.warn('[openaqua] could not open external URL:', error.message);
+    console.warn('[hydroweaver] could not open external URL:', error.message);
   }
 }
 
@@ -826,7 +826,7 @@ function buildMenu() {
         },
         { type: 'separator' },
         { role: 'reload', label: '刷新界面' },
-        ...(!app.isPackaged || process.env.OPENAQUA_DEBUG === '1'
+        ...(!app.isPackaged || process.env.HYDROWEAVER_DEBUG === '1'
           ? [{ role: 'toggleDevTools', label: '开发者工具' }]
           : []),
         { type: 'separator' },
@@ -997,7 +997,7 @@ if (!gotLock) {
     serverGeneration++;
     void stopServer()
       .catch((error) => {
-        console.warn('[openaqua] server cleanup failed during quit:', error.message);
+        console.warn('[hydroweaver] server cleanup failed during quit:', error.message);
       })
       .finally(() => {
         quitCleanupDone = true;

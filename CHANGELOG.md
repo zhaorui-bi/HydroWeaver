@@ -6,30 +6,63 @@ versioning.
 
 ## [Unreleased]
 
-### Added
-
-- Durable water-treatment research tasks that preserve a case across assessment,
-  evidence retrieval, recommendation, and report audit, with structured
-  attention items, input revisions, bounded job budgets, and recovery.
-- Six research-task MCP tools and a model-independent `openaqua research`
-  command for creating, observing, advancing, updating, and cancelling work.
-
-### Changed
-
-- CLI, Web, and desktop agent guidance now prefers durable research tasks for
-  complete case-to-report requests; individual operation tools remain available.
-
-### Repository maintenance
-
-- Keep one project license at the repository root and collect upstream notices
-  and release compliance files under `licenses/`.
-- Remove duplicate brand assets, generated icon intermediates, and unused
-  upstream GitHub automation, pending changelog entries, and promotional media.
-
 ### Planned
 
 - Additional dataset acquisition and curation helpers.
 - Broader real-backend integration fixtures and benchmark reporting.
+
+## [0.2.0-beta.1] - 2026-11-24
+
+### Added
+
+- Closed-loop treatment-train optimization. A new `optimize` adapter command and
+  the `hydroweaver_optimize_trains` MCP tool apply the constraint critic to
+  candidate trains, keep the critic's auto-revisions, and regenerate candidates
+  through the planner with a structured revision directive when a round stalls.
+  Each round records candidates before and after revision, the constraint
+  report, unresolved violations, and the directive; the record stops at
+  `feasible`, `stalled`, or `budget_exhausted` and always says which.
+- A `hydroweaver optimize` CLI command (`--input`, `--top-k`, `--max-rounds`,
+  `--wait`) that runs the closed loop directly as a durable job.
+- An `optimization` stage in the persistent research flow between
+  recommendation and audit. The stage optimizes the verified recommendation
+  trains and gates handoff: a stalled or budget-exhausted loop raises an
+  `optimization_inconclusive` attention item instead of claiming feasibility,
+  and `continue_screening` can carry the limitation into the audit.
+- Research tasks accept a bounded `maxRounds` optimization budget (default 3,
+  maximum 8).
+
+### Changed
+
+- The product is renamed **HydroWeaver**. The CLI command is `hydroweaver`, the
+  home directory defaults to `~/.hydroweaver`, the backend configuration file is
+  `hydroweaver.json`, job stores live under `<workdir>/hydroweaver-jobs`, and
+  the product environment namespace is `HYDROWEAVER_*`
+  (`HYDROWEAVER_HOME`, `HYDROWEAVER_COMMAND`, `HYDROWEAVER_REPO`,
+  `HYDROWEAVER_PYTHON`, `HYDROWEAVER_WORKDIR`, `HYDROWEAVER_JOBS_DIR`,
+  `HYDROWEAVER_WEB_ASSETS_DIR`, `HYDROWEAVER_OPENROUTER_MODEL`,
+  `HYDROWEAVER_DEFAULT_MODEL`, `HYDROWEAVER_PLANNER_MODEL`,
+  `HYDROWEAVER_EXPLANATION_MODEL`). Onboarding flags are
+  `--hydroweaver-repo` and `--hydroweaver-command`.
+- MCP tools are renamed to the `hydroweaver_*` prefix (25 tools), the MCP server
+  is registered as `hydroweaver`, and the skills are `hydroweaver` and
+  `hydroweaver-campaign`. The engine workspace package is `hydroweaver` at
+  `engine/apps/hydroweaver`.
+- The default research job budget is six backend jobs (assessment, retrieval,
+  recommendation, optimization, audit, plus retry headroom) instead of four.
+- Desktop and Web branding, the ASCII banner, and the terminal host identity
+  use the HydroWeaver name and the "from plausible to feasible" framing.
+- The external OpenAqua project, its Hugging Face dataset, upstream environment
+  variables, and the paper citation are unchanged; HydroWeaver remains an
+  independent product layered on that pipeline.
+
+### Repository maintenance
+
+- Regenerated third-party notices and the SBOM for the renamed product
+  packages and artifact names.
+- Rewrote the README, quick start, architecture, research-task, FAQ,
+  troubleshooting, and release documentation around HydroWeaver and the
+  closed-loop optimization workflow.
 
 ## [0.1.0-beta.2] - 2026-11-02
 
@@ -84,9 +117,9 @@ versioning.
 
 ### Added
 
-- Complete OpenAqua Harness product shell with CLI, TUI, Web, and Electron
+- Complete HydroWeaver product shell with CLI, TUI, Web, and Electron
   desktop interfaces based on the open-source Kimi Code engine.
-- Bundled `openaqua_cli.py` adapter over the OpenAqua Parser → Retriever →
+- Bundled `hydroweaver_cli.py` adapter over the OpenAqua Parser → Retriever →
   Planner → Critic → Explanation workflow, with clean JSON stdout, current
   WContBench evidence-layout compatibility, and evaluator-module isolation.
 - MCP tools for status, taxonomy browsing, query normalization, recommendation,
@@ -132,6 +165,6 @@ versioning.
 - Recommendations remain early-stage engineering decision support and require
   expert, regulatory, laboratory, pilot, and site-specific review.
 
-[Unreleased]: https://github.com/zhaorui-bi/OpenAqua-Harness/commits/main
-[0.1.0-beta.2]: https://github.com/zhaorui-bi/OpenAqua-Harness/compare/6acc5252aff11946f6be8eca23882662ba4e8cb8...main
-[0.1.0-beta.1]: https://github.com/zhaorui-bi/OpenAqua-Harness/tree/6acc5252aff11946f6be8eca23882662ba4e8cb8
+[Unreleased]: https://github.com/zhaorui-bi/HydroWeaver/commits/main
+[0.1.0-beta.2]: https://github.com/zhaorui-bi/HydroWeaver/compare/6acc5252aff11946f6be8eca23882662ba4e8cb8...main
+[0.1.0-beta.1]: https://github.com/zhaorui-bi/HydroWeaver/tree/6acc5252aff11946f6be8eca23882662ba4e8cb8

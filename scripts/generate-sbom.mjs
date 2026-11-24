@@ -53,7 +53,7 @@ const releaseDate = /^date-released:\s*["']?([^"'\s]+)["']?$/m.exec(
 )?.[1];
 if (releaseDate === undefined) fail('CITATION.cff has no date-released value');
 
-const harnessId = 'SPDXRef-OpenAqua-Harness';
+const harnessId = 'SPDXRef-HydroWeaver';
 const engineId = 'SPDXRef-RootPackage';
 const versionRef = /^\d/.test(rootPackage.version)
   ? `v${rootPackage.version}`
@@ -71,7 +71,7 @@ const addedPackages = [
     copyrightText: 'NOASSERTION',
     supplier: `Person: ${authorName(rootPackage.author)}`,
     homepage: rootPackage.homepage,
-    externalRefs: [purlRef(`pkg:github/zhaorui-bi/OpenAqua-Harness@${rootPackage.version}`)],
+    externalRefs: [purlRef(`pkg:github/zhaorui-bi/HydroWeaver@${rootPackage.version}`)],
   },
   {
     SPDXID: 'SPDXRef-Upstream-OpenAqua-0e39908',
@@ -110,12 +110,12 @@ for (const entry of addedPackages) {
 }
 if (!existingIds.has(engineId)) fail(`pnpm SBOM omitted engine root ${engineId}`);
 
-sbom.name = `OpenAqua Harness ${rootPackage.version}`;
-sbom.documentNamespace = `https://github.com/zhaorui-bi/OpenAqua-Harness/releases/tag/${versionRef}/SBOM.spdx.json`;
+sbom.name = `HydroWeaver ${rootPackage.version}`;
+sbom.documentNamespace = `https://github.com/zhaorui-bi/HydroWeaver/releases/tag/${versionRef}/SBOM.spdx.json`;
 sbom.creationInfo = {
   created: `${releaseDate}T00:00:00Z`,
   creators: [
-    'Organization: OpenAqua Harness contributors',
+    'Organization: HydroWeaver contributors',
     `Tool: pnpm-${pnpmManifest.version}`,
     'Tool: scripts/generate-sbom.mjs',
   ],

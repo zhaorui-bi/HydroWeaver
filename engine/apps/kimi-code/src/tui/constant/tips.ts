@@ -21,7 +21,7 @@ export interface ToolbarTip {
  * Subset of toolbar tips shown behind the composing spinner.
  */
 export const WORKING_TIPS: readonly ToolbarTip[] = [
-  ...(INTERACTIVE_HOST.id === 'openaqua-harness'
+  ...(INTERACTIVE_HOST.id === 'hydroweaver'
     ? [
         {
           text: 'start with source water, measured units, contaminants, effluent targets, and operating constraints',

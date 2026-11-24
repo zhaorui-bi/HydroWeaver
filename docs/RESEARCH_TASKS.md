@@ -1,10 +1,10 @@
 # Durable water-treatment research tasks
 
 Research tasks connect a case, its information needs, evidence retrieval,
-recommendations, and report audit across sessions. The six `openaqua_research_*`
-tools expose the same controller as `openaqua research`; the original 18 tools
+recommendations, closed-loop optimization, and report audit across sessions. The six `hydroweaver_research_*`
+tools expose the same controller as `hydroweaver research`; the original 18 tools
 remain available for independent operations. The controller's gates apply to
-this research workflow, not to direct calls to `openaqua_recommend`.
+this research workflow, not to direct calls to `hydroweaver_recommend`.
 
 ## From case to handoff
 
@@ -14,10 +14,12 @@ flowchart LR
     Readiness --> Case[Case assessment]
     Case --> Evidence[Evidence retrieval]
     Evidence --> Design[Treatment-train recommendation]
-    Design --> Audit[Structural report audit]
+    Design --> Optimize[Closed-loop optimization]
+    Optimize --> Audit[Structural report audit]
     Audit --> Handoff[Ready for research handoff]
     Case --> Attention[Structured information or recovery task]
     Audit --> Attention
+    Optimize --> Attention
     Attention --> Revision[Declared response / new query revision]
     Revision --> Case
 ```
@@ -39,6 +41,25 @@ ready.
 `ready` is not expert approval, proof of evidence applicability, a performance
 guarantee, or regulatory compliance. The report audit checks structure and
 declared support; it does not establish semantic entailment or site suitability.
+
+## The closed-loop optimization stage
+
+Between recommendation and audit, the `optimization` stage runs the backend
+`optimize` command once as a durable job. It starts from the verified
+recommendation trains, applies the constraint critic, keeps the critic's
+auto-revisions, and regenerates candidates through the planner with a structured
+revision directive whenever a round stops making progress. The loop stops at
+`feasible`, `stalled`, or `budget_exhausted`, and the record says which.
+
+| Outcome | Gate behavior |
+| --- | --- |
+| `feasible` | Every chain passed its machine-readable constraint check; the stage advances to audit. |
+| `stalled` / `budget_exhausted` | The stage raises an `optimization_inconclusive` attention item. Respond with `amend_query` for a revised case, or `continue_screening` to proceed to the structural audit with the limitation recorded. A stalled loop never degrades into a feasible claim. |
+
+The optimizer's output is verified against the closed-loop contract
+(`kind` `hydroweaver.closed-loop-optimization`, a non-empty round trace, and
+consistent round accounting) before it is consumed, and its manifest records both
+the frozen query and the candidate-train file as inputs.
 
 ## Start a task without a conversational model
 
@@ -83,13 +104,14 @@ Save `research-create.json`:
   "objective": "Compare three early-stage treatment trains for the declared groundwater case, retaining evidence, constraints and uncertainty.",
   "queryFile": "case.json",
   "topK": 3,
-  "maxJobs": 4
+  "maxJobs": 6,
+  "maxRounds": 3
 }
 ```
 
 ```bash
-./bin/openaqua research create --input research-create.json
-./bin/openaqua research list
+./bin/hydroweaver research create --input research-create.json
+./bin/hydroweaver research list
 ```
 
 Creation freezes the input and returns the task, including `id`, `version`,
@@ -104,8 +126,8 @@ Replace the example ID below with the returned `id`. Supply the latest returned
 `version` when requesting a change; a stale version is refused.
 
 ```bash
-./bin/openaqua research status --id research_0123456789abcdef01234567
-./bin/openaqua research advance --id research_0123456789abcdef01234567 --expected-version 1
+./bin/hydroweaver research status --id research_0123456789abcdef01234567
+./bin/hydroweaver research advance --id research_0123456789abcdef01234567 --expected-version 1
 ```
 
 `advance` reconciles the current assignment and advances only when that stage's
@@ -129,9 +151,11 @@ execution evidence.
 
 Running or unknown jobs are not automatically relaunched. The controller keeps
 job and output identities and refuses to treat a missing, malformed, or changed
-result as a verified stage completion. The default budget is **four backend
-jobs**, with a maximum of **16**; retries and revised-case reassessments consume
-that budget too. No automatic index rebuild, knowledge ingestion, benchmark
+result as a verified stage completion. The default budget is **six backend
+jobs** (assessment, retrieval, recommendation, optimization, audit, plus retry
+headroom), with a maximum of **16**; retries and revised-case reassessments consume
+that budget too. The optimization stage additionally carries a bounded round budget
+(`maxRounds`, default 3, maximum 8) consumed inside one backend process. No automatic index rebuild, knowledge ingestion, benchmark
 campaign, or external message delivery is part of advancing a task.
 
 ## Respond to structured attention
@@ -144,7 +168,7 @@ as `expectedVersion`. Responses record the caller's reason; they are
 | Response | Permitted use |
 | --- | --- |
 | `amend_query` | Supply a new query file to address missing case data; preserve the old revision and rerun applicable gates. |
-| `continue_screening` | Continue conditional screening for eligible high-priority information gaps, with a reason. Critical blockers cannot be waived. |
+| `continue_screening` | Continue conditional screening for eligible high-priority information gaps, or proceed to the structural audit after an inconclusive optimization loop, with a reason. Critical blockers cannot be waived. |
 | `retry` | Retry an eligible, confirmed terminal failure or recheck runtime readiness within the existing budget. Running and unknown jobs are not retryable. |
 
 For a case waiting on missing information, obtain the documented data, save a new file
@@ -162,7 +186,7 @@ For a case waiting on missing information, obtain the documented data, save a ne
 ```
 
 ```bash
-./bin/openaqua research respond --input research-response.json
+./bin/hydroweaver research respond --input research-response.json
 ```
 
 The IDs and version above illustrate the format; use the values actually
@@ -174,17 +198,17 @@ the handoff and arrange independent scientific review.
 
 Every CLI action accepts `--input FILE` with the corresponding MCP JSON schema.
 Input must be a regular UTF-8 JSON object of at most 64 KiB; unknown command fields are
-rejected. Relative input and query paths resolve from `OPENAQUA_WORKDIR`, or the
+rejected. Relative input and query paths resolve from `HYDROWEAVER_WORKDIR`, or the
 current workspace when unset. `--home DIR` selects Harness backend configuration.
 
 | CLI action / MCP tool | Input |
 | --- | --- |
-| `create` / `openaqua_research_create` | `requestId`, `objective`, `queryFile`, optional `topK` (1–10), `maxJobs` (1–16). |
-| `status` / `openaqua_research_status` | `taskId`; CLI also accepts `--id ID`. |
-| `list` / `openaqua_research_list` | Optional `status` and `limit` (1–100); CLI needs no input for defaults. |
-| `advance` / `openaqua_research_advance` | `taskId`, optional `expectedVersion`; CLI also accepts `--id ID [--expected-version N]`. |
-| `respond` / `openaqua_research_respond` | `taskId`, `attentionId`, `expectedVersion`, `action`, `reason`, optional `queryFile`. |
-| `cancel` / `openaqua_research_cancel` | `taskId`, `reason`, optional `expectedVersion`. |
+| `create` / `hydroweaver_research_create` | `requestId`, `objective`, `queryFile`, optional `topK` (1–10), `maxJobs` (1–16), `maxRounds` (1–8). |
+| `status` / `hydroweaver_research_status` | `taskId`; CLI also accepts `--id ID`. |
+| `list` / `hydroweaver_research_list` | Optional `status` and `limit` (1–100); CLI needs no input for defaults. |
+| `advance` / `hydroweaver_research_advance` | `taskId`, optional `expectedVersion`; CLI also accepts `--id ID [--expected-version N]`. |
+| `respond` / `hydroweaver_research_respond` | `taskId`, `attentionId`, `expectedVersion`, `action`, `reason`, optional `queryFile`. |
+| `cancel` / `hydroweaver_research_cancel` | `taskId`, `reason`, optional `expectedVersion`. |
 
 Do not combine `--input` with `--id` or `--expected-version`. Task versions are
 positive integers. Five actions return the task at the JSON top level; `list`

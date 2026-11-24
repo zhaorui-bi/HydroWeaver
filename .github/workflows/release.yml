@@ -172,7 +172,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          app_path="$(find dist -type d -name 'OpenAqua Harness.app' -print -quit)"
+          app_path="$(find dist -type d -name 'HydroWeaver.app' -print -quit)"
           test -n "$app_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
           spctl --assess --type execute --verbose=4 "$app_path"
@@ -204,7 +204,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/OpenAqua-Harness-*
+            dist/HydroWeaver-*
 
   publish:
     name: Publish GitHub release
@@ -292,7 +292,7 @@ jobs:
               gh release create "$RELEASE_TAG" "${assets[@]}" \
                 --repo "$GITHUB_REPOSITORY" \
                 --verify-tag \
-                --title "OpenAqua Harness ${RELEASE_TAG#v}" \
+                --title "HydroWeaver ${RELEASE_TAG#v}" \
                 --notes-file release-assets/RELEASE_NOTES.md \
                 "${prerelease[@]}"
               ;;
@@ -310,7 +310,7 @@ jobs:
               gh release edit "$RELEASE_TAG" \
                 --repo "$GITHUB_REPOSITORY" \
                 --verify-tag \
-                --title "OpenAqua Harness ${RELEASE_TAG#v}" \
+                --title "HydroWeaver ${RELEASE_TAG#v}" \
                 --notes-file release-assets/RELEASE_NOTES.md \
                 --prerelease="$([[ "$RELEASE_TAG" == *-* ]] && echo true || echo false)" \
                 --draft=false

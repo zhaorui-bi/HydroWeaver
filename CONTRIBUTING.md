@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving OpenAqua Harness.
+Thank you for improving HydroWeaver.
 
 ## Development setup
 
@@ -16,13 +16,13 @@ npm run setup
 npm run check
 ```
 
-Use `npm start` for Electron and `./bin/openaqua web` for the browser interface.
+Use `npm start` for Electron and `./bin/hydroweaver web` for the browser interface.
 Most product tests use fake adapter-compatible commands; an OpenAqua checkout
 and downloaded data are required only for real pipeline integration tests.
 
 ## Change boundaries
 
-- Keep product work under `engine/apps/openaqua-harness`, the root Electron
+- Keep product work under `engine/apps/hydroweaver`, the root Electron
   shell, packaging, scripts, or documentation whenever possible.
 - Avoid changing upstream Kimi Code behavior unless the change is independently
   suitable for upstream; branded behavior must remain gated by the OpenAqua
@@ -74,7 +74,7 @@ npm run check
 npm run build
 npm audit --audit-level=low
 npm run audit:runtime
-python3 -m py_compile engine/apps/openaqua-harness/backend/openaqua_cli.py
+python3 -m py_compile engine/apps/hydroweaver/backend/hydroweaver_cli.py
 ```
 
 For adapter changes, test at least `--version`, `health --json`, and the affected

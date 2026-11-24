@@ -1,0 +1,173 @@
+---
+name: hydroweaver-campaign
+description: Plan, pilot, compare, evaluate, and report a reproducible OpenAqua water-treatment study across multiple queries, benchmark splits, retrieval settings, prompts, models, or knowledge snapshots. Use for WContBench evaluation, batch comparisons, ablations, and repeated treatment-train studies. Do not use for one routine query or job lookup.
+---
+
+# Reproducible OpenAqua campaigns
+
+Use this skill when the unit of work is a study rather than one tool call.
+OpenAqua tools execute the pipeline and evaluators; ordinary workspace tools
+maintain the study manifest, prediction files, and summary tables.
+
+For each complete case-to-report branch, prefer the `hydroweaver_research_*`
+controller from the `hydroweaver` skill. Create a task with a stable request ID,
+declared objective and frozen query file, then advance it through readiness,
+case assessment, retrieval, recommendation, and audit. Record its task ID,
+query revision, attention outcomes and assignment job IDs in the campaign
+manifest. Existing independent tools remain appropriate for benchmark metrics,
+retrieval-only experiments, and explicitly declared manual comparisons.
+
+The task controller does not execute a whole comparison matrix or evaluate a
+benchmark automatically. Keep the campaign's declared matrix and global budget
+in addition to each task's default four-job budget (maximum 16, including
+retries/reassessments). Do not create replacement tasks to conceal failed gates
+or bypass exhausted budgets. A caller-declared attention response is not
+verified human approval, and audit warnings/failures cannot be promoted to a
+ready handoff.
+
+## 1. Freeze the question
+
+Before execution, record:
+
+- study objective and decision owner;
+- query population or WContBench split;
+- OpenAqua checkout revision;
+- Hugging Face dataset repository and snapshot/revision;
+- processed knowledge and generated-index identity;
+- parser/planner/explainer model names and OpenRouter settings;
+- structured query policy, unit conventions, and missing-data policy;
+- treatment-train and/or retrieval metrics;
+- comparison factors, budgets, stop conditions, and success criteria.
+
+If the study asks a question that the available metrics do not measure, label
+the metric as a proxy. Do not turn benchmark agreement into evidence of
+site-specific treatment performance.
+
+## 2. Create a manifest before launching jobs
+
+Create `campaign_manifest.json` in the output directory. At minimum:
+
+```json
+{
+  "schema_version": 1,
+  "campaign_id": "...",
+  "created_at": "...",
+  "objective": "...",
+  "hydroweaver_revision": "...",
+  "dataset": {"repo": "zhaorui-bi/OpenAqua", "revision": "..."},
+  "knowledge_snapshot": {},
+  "model_configuration": {},
+  "query_set": {},
+  "comparison_matrix": [],
+  "metrics": [],
+  "budget": {},
+  "stages": [],
+  "status": "planned"
+}
+```
+
+For each execution preserve:
+
+- stable `run_id`, case/query ID, branch, and parent run when applicable;
+- input file path/hash or inline query hash;
+- backend revision, dataset/index identity, model settings, and prompt branch;
+- tool name, job ID, request SHA-256, command arguments, output path, and captured result SHA-256;
+- research task ID, task version, query revision, attention items and declared responses when the task controller is used;
+- timestamps, lifecycle status, failure category, and retry relationship;
+- complete predictions, required metrics, and explicit missing values;
+- constraint violations, auto-revisions, evidence IDs, assumptions, and
+  uncertainty where the output provides them.
+
+Never infer lineage from filenames or row order. Never overwrite the result of
+an earlier branch; use a new directory and link it by stable IDs.
+
+## 3. Advance through gates
+
+1. **Readiness** — `hydroweaver_status`; verify dependencies, processed knowledge,
+   non-empty indexes, and benchmark paths.
+2. **Normalization smoke** — validate representative easy and difficult queries,
+   synonyms, units, targets, and constraints.
+3. **End-to-end smoke** — one recommendation and/or retrieval case reaches the
+   intended output and evaluator.
+4. **Pilot** — a small stratified subset estimates completion rate, malformed
+   output rate, latency, evidence coverage, and recurring failure modes.
+5. **Campaign** — execute only the approved matrix and budget, in bounded,
+   restartable batches.
+6. **Evaluation** — run `hydroweaver_evaluate_trains` and/or
+   `hydroweaver_evaluate_retrieval` on frozen prediction files.
+7. **Handoff** — publish the manifest, complete predictions, metrics, failures,
+   artifact index, and limitations.
+
+Stop at a failed gate. Diagnose missing data, empty indexes, schema drift, model
+errors, or path mismatches before increasing scale.
+
+## 4. Keep comparisons fair
+
+- Change one declared factor at a time, or define the complete factorial matrix
+  in advance.
+- Use the same case set, target `top_k`, normalization policy, metric script,
+  and knowledge snapshot across comparable branches.
+- Freeze or explicitly vary the OpenRouter model and settings. Model responses
+  can be stochastic and remote models can change without a local code change.
+- Keep attempted cases in the denominator. Missing predictions are failures,
+  not rows to delete before averaging.
+- Report per-split and aggregate values; do not let a large/easy split hide a
+  failed difficult split.
+- Preserve case-level details and confidence intervals or repeated-run
+  variability when the study supports them.
+- Do not tune on the test split and report the same split as an unbiased final
+  result.
+- Do not compare metrics produced by different evaluator revisions without an
+  explicit compatibility analysis.
+
+## 5. Manage data and indexes explicitly
+
+OpenAqua code and Hugging Face assets are separate. Record whether a run used:
+
+- `data.zip` processed knowledge;
+- an optional raw crawl snapshot;
+- a specific WContBench split;
+- indexes generated by `hydroweaver_build_indexes`;
+- staged records under `data/ingest` that are not part of canonical indexes.
+
+Schema-version-2 run manifests recursively fingerprint benchmark directories
+within explicit entry and byte limits and report whether the tree hash is
+complete. Symbolic links are never followed. Preserve an immutable dataset
+revision or external checksum inventory whenever the fingerprint is incomplete,
+and retain the upstream dataset identity even when it is complete.
+
+## 6. Observe without flooding context
+
+Use `hydroweaver_job_list` and `hydroweaver_job_status` to recover and monitor work.
+For task-controlled branches, use `hydroweaver_research_list` and
+`hydroweaver_research_status` for read-only recovery, and
+`hydroweaver_research_advance` to reconcile an existing assignment before moving
+on. `status` does not advance it. A running or unknown job is not a reason to
+start another copy. Preserve structured attention and the controller's
+`scientificOutcome`; successful execution is separate from scientific readiness.
+At every decision point preserve `hydroweaver_job_manifest` and its
+`requestSha256`. Use bounded log views:
+
+- `view: "errors"` for triage;
+- `view: "events"` for lifecycle and metric summaries;
+- `cursor: 0` plus `nextCursor` for deterministic traversal;
+- `hydroweaver_job_artifacts` for output metadata.
+
+Keep raw logs on disk. Quote only the lines required to support a diagnosis.
+
+## 7. Report the complete study
+
+The final report must include:
+
+- planned versus completed branches and reasons for deviations;
+- attempted, completed, failed, evaluable, and missing-prediction counts;
+- train-design and retrieval metrics with explicit denominators;
+- per-split results and relevant distributions, not only one aggregate number;
+- latency/resource summaries when measured;
+- failure categories and schema/data/model errors;
+- representative successful and failed cases with evidence/constraint context;
+- exact checkout, dataset, index, model, evaluator, and manifest identities;
+- limits on external validity and required expert/site-specific validation.
+
+Call the result a computational benchmark or early-stage engineering study, not
+proof that a treatment train is compliant, optimal, safe, or field-ready.

@@ -1,6 +1,6 @@
 # 为内嵌引擎贡献代码
 
-OpenAqua Harness 的改动统一遵循根目录的[贡献指南](../CONTRIBUTING.md)和
+HydroWeaver 的改动统一遵循根目录的[贡献指南](../CONTRIBUTING.md)和
 [PR 模板](../.github/pull_request_template.md)。安装、验证和版本发布均从仓库根目录管理。
 
 修改引擎内部实现时，请遵循 [AGENTS.md](./AGENTS.md) 及最近的软件包指引，

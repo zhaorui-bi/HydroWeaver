@@ -11,11 +11,11 @@ dist/
 *.pfx
 
 # Local runtime data may contain API keys, credentials, sessions and logs.
-/.openaqua/
+/.hydroweaver/
 /.kimi-code/
-/openaqua-data/
+/hydroweaver-data/
 /kimi-data/
-**/openaqua-jobs/
+**/hydroweaver-jobs/
 /mcp.json
 /server.token
 

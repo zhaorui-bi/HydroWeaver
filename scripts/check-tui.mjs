@@ -40,15 +40,15 @@ const tests = [
 ];
 
 const defaultEnv = { ...process.env };
-delete defaultEnv['OPENAQUA_TUI'];
-delete defaultEnv['OPENAQUA_VERSION'];
+delete defaultEnv['HYDROWEAVER_TUI'];
+delete defaultEnv['HYDROWEAVER_VERSION'];
 
 run('TUI typecheck', tscEntry, ['-p', 'tsconfig.json', '--noEmit'], defaultEnv);
 run('Kimi host regression suite', vitestEntry, ['run', ...tests], defaultEnv);
-run('OpenAqua host regression suite', vitestEntry, ['run', ...tests], {
+run('HydroWeaver host regression suite', vitestEntry, ['run', ...tests], {
   ...defaultEnv,
-  OPENAQUA_TUI: '1',
-  OPENAQUA_VERSION: productVersion,
+  HYDROWEAVER_TUI: '1',
+  HYDROWEAVER_VERSION: productVersion,
 });
 
 process.stdout.write('TUI check: both interactive hosts passed.\n');
