@@ -9,11 +9,11 @@ import path from 'node:path';
 import * as asar from '@electron/asar';
 
 const require = createRequire(import.meta.url);
-const root = mkdtempSync(path.join(os.tmpdir(), 'openaqua-packaging-'));
+const root = mkdtempSync(path.join(os.tmpdir(), 'hydroweaver-packaging-'));
 const source = path.join(root, 'source');
 const archive = path.join(root, 'app.asar');
 const files = {
-  'main.js': 'console.log("OpenAqua");\n',
+  'main.js': 'console.log("HydroWeaver");\n',
   'lib/helper.js': 'export const units = "µg/L";\n',
   'data/quality.json': '{"arsenic_ug_L":150}\n',
   'native/addon.node': 'synthetic native-file fixture\n',
@@ -64,13 +64,13 @@ try {
     cwd: source,
     signal: AbortSignal.abort(new Error('packaging traversal canceled')),
   }), /packaging traversal canceled/);
-  const trackedDirectory = temp.mkdirSync('openaqua-packaging-cleanup-');
+  const trackedDirectory = temp.mkdirSync('hydroweaver-packaging-cleanup-');
   writeFileSync(path.join(trackedDirectory, 'temporary-file'), 'temporary');
   await new Promise((resolve, reject) => {
     temp.cleanup((error) => error ? reject(error) : resolve());
   });
   assert.equal(existsSync(trackedDirectory), false);
-  const syncDirectory = temp.mkdirSync('openaqua-packaging-sync-cleanup-');
+  const syncDirectory = temp.mkdirSync('hydroweaver-packaging-sync-cleanup-');
   writeFileSync(path.join(syncDirectory, 'temporary-file'), 'temporary');
   temp.cleanupSync();
   assert.equal(existsSync(syncDirectory), false);

@@ -1,6 +1,6 @@
 # Architecture
 
-OpenAqua Harness combines four layers:
+HydroWeaver combines four layers:
 
 1. a branded CLI/TUI/Web/Electron product;
 2. the vendored Kimi Code agent engine;
@@ -22,7 +22,7 @@ flowchart TB
     TUI --> HARNESS
     WEB --> KAP[kap-server]
     DESKTOP --> KAP
-    KAP --> HARNESS[OpenAqua Harness]
+    KAP --> HARNESS[HydroWeaver]
 
     HARNESS --> AGENT[Kimi Code SDK]
     HARNESS --> MCP[MCP stdio server]
@@ -30,7 +30,7 @@ flowchart TB
     TOOLS --> RESEARCH[Gated research-task controller]
     RESEARCH --> JOBS[Durable job store / runner]
     TOOLS --> JOBS
-    TOOLS --> ADAPTER[openaqua_cli.py]
+    TOOLS --> ADAPTER[hydroweaver_cli.py]
     JOBS --> ADAPTER
     ADAPTER --> REPO[External OpenAqua checkout]
     REPO --> DATA[Processed KB + BM25 indexes]
@@ -39,33 +39,56 @@ flowchart TB
 
 CLI sessions attach the MCP server directly to the SDK session. Web and desktop
 sessions register it in `<home>/mcp.json`, allowing kap-server sessions to load
-the same 24-tool surface. Six research-task tools add a persistent controller
+the same 25-tool surface. Six research-task tools add a persistent controller
 over the original 18 independent operations.
 
 ## Python adapter boundary
 
 OpenAqua does not expose one unified CLI, so the Harness ships
-`backend/openaqua_cli.py`. It adds a stable JSON-oriented command contract:
+`backend/hydroweaver_cli.py`. It adds a stable JSON-oriented command contract:
 
 ```text
-health, identity, catalog, normalize, assess-case, recommend, retrieve,
-check-constraints, build-indexes, ingest, evaluate-trains, evaluate-retrieval,
-audit-report
+health, identity, catalog, normalize, assess-case, recommend, optimize,
+retrieve, check-constraints, build-indexes, ingest, evaluate-trains,
+evaluate-retrieval, audit-report
 ```
 
 The adapter prepends `water_treatment_agent/` to `sys.path`, sets the working
 directory expected by OpenAqua, invokes its public agents/pipeline/evaluation
 scripts, serializes Pydantic models, and writes result JSON atomically.
 
-The adapter does not vendor or modify the external OpenAqua source tree. Backend
-resolution is implemented in `src/openaqua/backend.ts` and supports:
+## Closed-loop optimizer
 
-- `OPENAQUA_COMMAND`;
-- `~/.openaqua/openaqua.json`;
-- `OPENAQUA_REPO`;
+`optimize` runs inside one bounded backend process so a whole revision loop costs
+one durable job:
+
+```text
+initial candidates (pipeline planner or caller-supplied)
+  └─► round n: ConstraintCriticAgent on the current bundle
+        ├─ every chain PASS ───────────────► status feasible, stop
+        ├─ critic revised the bundle ──────► next round re-checks the revision
+        └─ no critic progress ─────────────► planner regeneration with a
+                                              structured revision directive
+        (round budget exhausted, or regeneration also stalls ──► stop)
+```
+
+`command_optimize` in `backend/hydroweaver_cli.py` owns the loop. It records each
+round's candidates before and after revision, the constraint report, a
+defensively-extracted per-chain status and violation list, and the directive sent
+to the planner. Feasibility is conservative: a chain without a machine-readable
+constraint report counts as unresolved. `hydroweaver_optimize_trains` in
+`src/hydroweaver/tools.ts` exposes it as a durable job; the research controller's
+`optimization` stage feeds the verified recommendation trains into it and refuses
+to treat a stalled or budget-exhausted loop as feasible.
+
+The adapter does not vendor or modify the external OpenAqua source tree. Backend
+resolution is implemented in `src/hydroweaver/backend.ts` and supports:
+- `HYDROWEAVER_COMMAND`;
+- `~/.hydroweaver/hydroweaver.json`;
+- `HYDROWEAVER_REPO`;
 - an adapter-compatible executable on `PATH`.
 
-Repository mode finds an explicit `OPENAQUA_PYTHON`, recognized virtual
+Repository mode finds an explicit `HYDROWEAVER_PYTHON`, recognized virtual
 environments, or a system Python interpreter.
 
 ## Tool execution model
@@ -81,6 +104,7 @@ Read-only/short operations run synchronously with bounded output and timeout:
 Longer or output-producing operations run as durable jobs:
 
 - recommendation;
+- closed-loop optimization;
 - evidence retrieval;
 - index building;
 - knowledge staging;
@@ -88,23 +112,24 @@ Longer or output-producing operations run as durable jobs:
 - retrieval evaluation;
 - structural claim–evidence report auditing.
 
-`src/openaqua/tools.ts` defines Zod schemas, maps camelCase MCP input to the
+`src/hydroweaver/tools.ts` defines Zod schemas, maps camelCase MCP input to the
 adapter’s snake_case JSON, resolves workspace-relative paths, performs input
 preflight, and assigns MCP safety annotations.
 
 ## Research-task lifecycle
 
-`src/openaqua/research.ts` owns a persistent case-to-report work item, separately
+`src/hydroweaver/research.ts` owns a persistent case-to-report work item, separately
 from the individual job attempts in `jobs.ts`. `research-tools.ts` validates the
 six MCP operations and shares their schemas with the JSON-oriented
-`openaqua research` CLI. Task status/list reads never dispatch work.
+`hydroweaver research` CLI. Task status/list reads never dispatch work.
 
 The controller freezes query revisions and declared scope, records structured
 attention and events, checks optimistic versions under a task lock, and links
-readiness, assessment, retrieval, recommendation, audit, and handoff stages.
-Advancement reconciles existing durable jobs before dispatching further work.
-The default backend-job budget is four, including retries and reassessments,
-with a maximum of 16. Critical case gaps and audit `fail`/`warn` outcomes cannot
+readiness, assessment, retrieval, recommendation, optimization, audit, and
+handoff stages. Advancement reconciles existing durable jobs before dispatching
+further work. The default backend-job budget is six (assessment, retrieval,
+recommendation, optimization, audit, plus retry headroom), including retries and
+reassessments, with a maximum of 16. Critical case gaps and audit `fail`/`warn` outcomes cannot
 be promoted to a ready handoff by a caller-declared response.
 
 These gates apply to the research controller; direct independent tools retain
@@ -115,7 +140,7 @@ for the full contract and mapping to the referenced prototype.
 
 ## Durable job lifecycle
 
-`src/openaqua/jobs.ts` creates a private job directory, writes runner config and
+`src/hydroweaver/jobs.ts` creates a private job directory, writes runner config and
 provenance atomically, then launches `dist/job-runner.mjs` as an independent
 process. The runner removes its transient config, starts the backend without a
 shell, streams stdout/stderr to `run.log`, forwards cancellation signals, and
@@ -137,7 +162,7 @@ symbolic links.
 
 ## Engineering provenance
 
-`src/openaqua/provenance.ts` creates a schema-versioned request identity:
+`src/hydroweaver/provenance.ts` creates a schema-versioned request identity:
 
 - tool and operation;
 - requested JSON-safe parameters;
@@ -167,10 +192,10 @@ its authenticated loopback URL.
 - bearer URL fragments redacted from logs;
 - startup and shutdown bounded by timeouts;
 - POSIX process groups / Windows process trees terminated on restart or quit;
-- production developer tools hidden unless `OPENAQUA_DEBUG=1`.
+- production developer tools hidden unless `HYDROWEAVER_DEBUG=1`.
 
 Desktop configuration and Harness home files use private permissions and atomic
-writes. The packaged app can import an existing `~/.openaqua` provider/backend
+writes. The packaged app can import an existing `~/.hydroweaver` provider/backend
 configuration without overwriting an initialized desktop home.
 
 ## Packaging layout
@@ -192,22 +217,22 @@ user-selected OpenAqua checkout and data remain external.
 
 ## Generated Web UI
 
-`engine/apps/openaqua-harness/scripts/sync-web-ui.mjs` copies the upstream
+`engine/apps/hydroweaver/scripts/sync-web-ui.mjs` copies the upstream
 prebuilt Web UI and applies deterministic product text, SVG, provider-flow, and
-CSS substitutions. `theme/openaqua.css` is appended together with self-hosted
+CSS substitutions. `theme/hydroweaver.css` is appended together with self-hosted
 fonts. Generated `web-ui/` files are not edited manually.
 
 ## Configuration separation
 
-- `OPENAQUA_HOME` stores Harness model/MCP/backend configuration.
-- `OPENAQUA_WORKDIR` is the default agent workspace and output base.
-- `OPENAQUA_JOBS_DIR` controls durable job metadata.
-- `OPENAQUA_REPO` points to external scientific code.
+- `HYDROWEAVER_HOME` stores Harness model/MCP/backend configuration.
+- `HYDROWEAVER_WORKDIR` is the default agent workspace and output base.
+- `HYDROWEAVER_JOBS_DIR` controls durable job metadata.
+- `HYDROWEAVER_REPO` points to external scientific code.
 - `OPENROUTER_API_KEY` is consumed by OpenAqua, not by the Harness provider
   subsystem unless separately configured there.
 
 Directly launched Kimi Code remains independent because the branded host is
-activated only when `OPENAQUA_TUI=1` or the OpenAqua host identity is supplied.
+activated only when `HYDROWEAVER_TUI=1` or the OpenAqua host identity is supplied.
 
 ## Quality gates
 

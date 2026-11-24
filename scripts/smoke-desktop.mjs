@@ -33,7 +33,7 @@ const executable = process.argv[2]
   ? path.resolve(process.argv[2])
   : findPackagedExecutable(path.join(root, 'dist'));
 const resources = resourcesDirectory(executable);
-const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'openaqua-desktop-smoke-'));
+const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hydroweaver-desktop-smoke-'));
 const output = [];
 let child;
 let timeout;
@@ -45,12 +45,12 @@ try {
     'harness/dist/mcp-server.mjs',
     'harness/dist/job-runner.mjs',
     'harness/dist/search-worker.mjs',
-    'harness/skills/openaqua/SKILL.md',
-    'harness/skills/openaqua-campaign/SKILL.md',
-    'harness/backend/openaqua_cli.py',
+    'harness/skills/hydroweaver/SKILL.md',
+    'harness/skills/hydroweaver-campaign/SKILL.md',
+    'harness/backend/hydroweaver_cli.py',
     'web-ui/index.html',
     'web-ui/favicon.ico',
-    'licenses/OPENAQUA_HARNESS_LICENSE',
+    'licenses/HYDROWEAVER_LICENSE',
     'licenses/KIMI_CODE_LICENSE',
     'licenses/OPENAQUA_UPSTREAM_LICENSE',
     'licenses/THIRD_PARTY_NOTICES.md',
@@ -86,7 +86,7 @@ try {
     env: {
       ...process.env,
       KIMI_LOG_LEVEL: 'off',
-      OPENAQUA_DEBUG: '0',
+      HYDROWEAVER_DEBUG: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -113,7 +113,7 @@ try {
   const research = spawnSync(
     executable,
     [
-      path.join(root, 'engine/apps/openaqua-harness/scripts/smoke-research.mjs'),
+      path.join(root, 'engine/apps/hydroweaver/scripts/smoke-research.mjs'),
       path.join(resources, 'harness/dist/cli.mjs'),
     ],
     {
@@ -131,7 +131,7 @@ try {
     );
   }
   process.stdout.write(
-    `Desktop smoke: packaged application, resources, and four-stage research workflow verified (${path.relative(root, executable)})\n`,
+    `Desktop smoke: packaged application, resources, and five-stage research workflow verified (${path.relative(root, executable)})\n`,
   );
 } catch (error) {
   clearTimeout(timeout);
@@ -166,19 +166,19 @@ function walk(directory, depth, files) {
 function isPlatformExecutable(filePath) {
   const normalized = filePath.replaceAll('\\', '/');
   if (process.platform === 'darwin') {
-    return normalized.endsWith('/OpenAqua Harness.app/Contents/MacOS/OpenAqua Harness');
+    return normalized.endsWith('/HydroWeaver.app/Contents/MacOS/HydroWeaver');
   }
   if (process.platform === 'win32') {
     return (
       normalized.includes('/win-unpacked/') &&
-      path.basename(filePath).toLowerCase().includes('openaqua') &&
+      path.basename(filePath).toLowerCase().includes('hydroweaver') &&
       filePath.toLowerCase().endsWith('.exe')
     );
   }
   if (!normalized.includes('/linux-unpacked/')) return false;
   try {
     accessSync(filePath, constants.X_OK);
-    return path.basename(filePath).toLowerCase().includes('openaqua');
+    return path.basename(filePath).toLowerCase().includes('hydroweaver');
   } catch {
     return false;
   }
@@ -219,7 +219,7 @@ function sha256(filePath) {
 function assertPackagedVersions(resourcesDirectoryPath, expectedVersion) {
   const adapterPath = path.join(
     resourcesDirectoryPath,
-    'harness/backend/openaqua_cli.py',
+    'harness/backend/hydroweaver_cli.py',
   );
   const adapterVersion = /^ADAPTER_VERSION\s*=\s*["']([^"']+)["']$/m.exec(
     readFileSync(adapterPath, 'utf8'),
@@ -233,7 +233,7 @@ function assertPackagedVersions(resourcesDirectoryPath, expectedVersion) {
   const sbomPath = path.join(resourcesDirectoryPath, 'licenses/SBOM.spdx.json');
   const sbom = JSON.parse(readFileSync(sbomPath, 'utf8'));
   const product = sbom.packages?.find(
-    (candidate) => candidate.SPDXID === 'SPDXRef-OpenAqua-Harness',
+    (candidate) => candidate.SPDXID === 'SPDXRef-HydroWeaver',
   );
   if (product?.versionInfo !== expectedVersion) {
     throw new Error(

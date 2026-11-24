@@ -80,7 +80,7 @@
         ./apps/kimi-code
         ./apps/vscode
         ./apps/kimi-inspect
-        ./apps/openaqua-harness
+        ./apps/hydroweaver
         ./apps/vis
         ./apps/vis/server
         ./apps/vis/web
@@ -106,7 +106,7 @@
         "@moonshot-ai/kimi-code"
         "kimi-code"
         "@moonshot-ai/kimi-inspect"
-        "openaqua-harness"
+        "hydroweaver"
         "@moonshot-ai/vis"
         "@moonshot-ai/vis-server"
         "@moonshot-ai/vis-web"

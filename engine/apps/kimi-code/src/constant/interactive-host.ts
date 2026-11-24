@@ -1,5 +1,5 @@
 export interface InteractiveHostBrand {
-  readonly id: 'kimi-code' | 'openaqua-harness';
+  readonly id: 'kimi-code' | 'hydroweaver';
   readonly productName: string;
   readonly assistantName: string;
   readonly commandName: string;
@@ -40,7 +40,7 @@ const KIMI_CODE_BRAND: InteractiveHostBrand = {
 };
 
 function openAquaVersion(env: NodeJS.ProcessEnv): string | undefined {
-  const value = env['OPENAQUA_VERSION']?.trim();
+  const value = env['HYDROWEAVER_VERSION']?.trim();
   if (value === undefined || value.length === 0 || value.length > 64) return undefined;
   return /^[0-9A-Za-z.+-]+$/.test(value) ? value : undefined;
 }
@@ -48,14 +48,14 @@ function openAquaVersion(env: NodeJS.ProcessEnv): string | undefined {
 export function resolveInteractiveHostBrand(
   env: NodeJS.ProcessEnv = process.env,
 ): InteractiveHostBrand {
-  if (env['OPENAQUA_TUI'] !== '1') return KIMI_CODE_BRAND;
+  if (env['HYDROWEAVER_TUI'] !== '1') return KIMI_CODE_BRAND;
   return {
-    id: 'openaqua-harness',
-    productName: 'OpenAqua Harness',
-    assistantName: 'OpenAqua',
-    commandName: 'openaqua',
-    processName: 'openaqua-harness',
-    logo: ['<~AQUA~>', ' HARNESS'],
+    id: 'hydroweaver',
+    productName: 'HydroWeaver',
+    assistantName: 'HydroWeaver',
+    commandName: 'hydroweaver',
+    processName: 'hydroweaver',
+    logo: ['<~AQUA~>', ' WEAVER'],
     welcomeArt: [
       '   ____                   ___',
       '  / __ \\____  ___  ____  /   | ____ ___  ______ _',
@@ -63,11 +63,11 @@ export function resolveInteractiveHostBrand(
       '/ /_/ / /_/ /  __/ / / / ___ / /_/ / /_/ / /_/ /',
       '\\____/ .___/\\___/_/ /_/_/  |_\\__, /\\__,_/\\__,_/',
       '    /_/                       /_/',
-      '       <====[ H A R N E S S ]====>',
+      '       <====[ H Y D R O W E A V E R ]====>',
     ],
-    welcomeTagline: 'AGENTIC WATER-TREATMENT DESIGN',
-    welcomeDescription: 'Evidence-grounded early-stage process-train workbench',
-    welcomeSpecialties: 'PARSE  ::  RETRIEVE  ::  PLAN  ::  CRITIQUE  ::  EXPLAIN',
+    welcomeTagline: 'FROM PLAUSIBLE TO FEASIBLE',
+    welcomeDescription: 'Closed-loop optimization for water-treatment train design',
+    welcomeSpecialties: 'PARSE  ::  RETRIEVE  ::  PLAN  ::  CRITIQUE  ::  OPTIMIZE',
     transcriptMarker: '› ',
     promptSymbol: '›',
     promptLabel: 'WATER QUERY',
@@ -76,9 +76,9 @@ export function resolveInteractiveHostBrand(
     showRemoteBanners: false,
     hiddenCommands: ['desktop', 'feedback', 'login', 'plugins', 'remote-control', 'web'],
     identity: {
-      productName: 'openaqua-harness',
-      platform: 'openaqua_harness',
-      uiMode: 'openaqua-harness',
+      productName: 'hydroweaver',
+      platform: 'hydroweaver',
+      uiMode: 'hydroweaver',
     },
     version: openAquaVersion(env),
   };

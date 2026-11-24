@@ -1,6 +1,6 @@
 # Release process
 
-OpenAqua Harness is distributed from GitHub as source and as platform-specific
+HydroWeaver is distributed from GitHub as source and as platform-specific
 desktop artifacts. The npm workspaces remain private and are not an npm release
 channel.
 
@@ -9,19 +9,19 @@ channel.
 A release candidate is ready only when all of the following are true:
 
 - the release commit is checked out in a clean root Git worktree;
-- root package, lockfile, Harness package, Python adapter, changelog, citation,
+- root package, lockfile, HydroWeaver package, Python adapter, changelog, citation,
   and tag versions agree;
 - `npm run release:check` passes on the pinned Node.js release with Python 3.12 available for adapter tests;
 - the Node 26 compatibility job passes;
 - the built Web server reports a non-degraded global-search worker;
-- a clean home passes onboarding and `openaqua doctor --probe`;
+- a clean home passes onboarding and `hydroweaver doctor --probe`;
 - a bounded real-backend recommendation or retrieval smoke completes and records its output;
 - desktop artifacts have been built and launched on every advertised platform;
 - macOS and Windows artifacts are signed, and macOS is notarized and stapled;
 - release assets include SHA-256 checksums, `SBOM.spdx.json`, and the packaged license notices.
 
 Do not build a release from a directory that contains only the vendored
-`engine/.git`. Clone the OpenAqua Harness repository so tracked-file and
+`engine/.git`. Clone the HydroWeaver repository so tracked-file and
 sensitive-data checks run against the correct root worktree.
 
 ## Prepare the candidate
@@ -29,8 +29,8 @@ sensitive-data checks run against the correct root worktree.
 Use a clean clone and the Node version declared in `package.json`:
 
 ```bash
-git clone https://github.com/zhaorui-bi/OpenAqua-Harness.git
-cd OpenAqua-Harness
+git clone https://github.com/zhaorui-bi/HydroWeaver.git
+cd HydroWeaver
 npm ci
 npm run setup
 npm run release:check
@@ -51,13 +51,13 @@ npm run check:licenses
 Before tagging, update all of the following in one commit:
 
 - `package.json` and `package-lock.json`;
-- `engine/apps/openaqua-harness/package.json`;
-- `ADAPTER_VERSION` in `engine/apps/openaqua-harness/backend/openaqua_cli.py`;
+- `engine/apps/hydroweaver/package.json`;
+- `ADAPTER_VERSION` in `engine/apps/hydroweaver/backend/hydroweaver_cli.py`;
 - `CHANGELOG.md` and its comparison links;
 - `CITATION.cff`, its release date, and the visible README release labels.
 
 The repository check rejects version drift. Root package, lockfile root entry,
-Harness package, Python adapter, `CITATION.cff`, changelog section, and visible
+HydroWeaver package, Python adapter, `CITATION.cff`, changelog section, and visible
 README labels must all use the same SemVer identifier, including any prerelease
 suffix. For the current Beta channel, the repository check intentionally
 requires a numbered `x.y.z-beta.n` version; promoting to another channel must
@@ -80,7 +80,7 @@ After the required credentials and acceptance evidence are available:
 
 1. Check out the candidate commit and confirm its version and release date.
 2. Create and push an annotated tag with that exact version, for example
-   `git tag -a v0.1.0-beta.2 -m "OpenAqua Harness 0.1.0-beta.2"` followed by
+   `git tag -a v0.1.0-beta.2 -m "HydroWeaver 0.1.0-beta.2"` followed by
    `git push origin v0.1.0-beta.2`.
 3. Let the `Release` workflow verify, sign, notarize, package, and smoke-test
    every target. If a prior run failed, rerun it or dispatch `release.yml`
@@ -102,14 +102,14 @@ publishing that draft manually while its release workflow runs.
 Run this gate with a dedicated test provider account and non-sensitive example
 water-quality inputs. Do not place credentials or unpublished data in CI artifacts.
 
-1. Complete `openaqua onboard` in a fresh temporary home.
-2. Require every required `openaqua doctor --probe` check to pass.
-3. Invoke `openaqua_status` and `openaqua_catalog` through MCP.
+1. Complete `hydroweaver onboard` in a fresh temporary home.
+2. Require every required `hydroweaver doctor --probe` check to pass.
+3. Invoke `hydroweaver_status` and `hydroweaver_catalog` through MCP.
 4. Run one minimal, bounded structured recommendation or retrieval operation with explicit input and output.
 5. Verify job status, timestamps, bounded logs, and artifact indexing.
 6. Exercise graceful cancellation on a disposable job.
 7. Confirm that a restarted server can recover the completed job.
-8. Record Harness, OpenAqua commit, Hugging Face revision, index chunk count,
+8. Record HydroWeaver, OpenAqua commit, Hugging Face revision, index chunk count,
    provider/model, and operating-system versions.
 
 This is an integration gate, not evidence that a treatment train is compliant,
@@ -143,9 +143,9 @@ Resources/harness/dist/mcp-server.mjs
 Resources/harness/dist/job-runner.mjs
 Resources/harness/dist/search-worker.mjs
 Resources/harness/skills/
-Resources/harness/backend/openaqua_cli.py
+Resources/harness/backend/hydroweaver_cli.py
 Resources/web-ui/
-Resources/licenses/OPENAQUA_HARNESS_LICENSE
+Resources/licenses/HYDROWEAVER_LICENSE
 Resources/licenses/KIMI_CODE_LICENSE
 Resources/licenses/OPENAQUA_UPSTREAM_LICENSE
 Resources/licenses/THIRD_PARTY_NOTICES.md
@@ -191,9 +191,9 @@ APPLE_API_ISSUER=...
 After building, require both checks to pass:
 
 ```bash
-codesign --verify --deep --strict --verbose=2 "OpenAqua Harness.app"
-spctl --assess --type execute --verbose=4 "OpenAqua Harness.app"
-xcrun stapler validate OpenAqua-Harness-*.dmg
+codesign --verify --deep --strict --verbose=2 "HydroWeaver.app"
+spctl --assess --type execute --verbose=4 "HydroWeaver.app"
+xcrun stapler validate HydroWeaver-*.dmg
 ```
 
 For Windows, configure `WINDOWS_CSC_LINK` and

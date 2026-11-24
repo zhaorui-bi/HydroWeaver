@@ -6,11 +6,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const testDir = path.join(root, 'engine', 'apps', 'openaqua-harness', 'test-python');
+const testDir = path.join(root, 'engine', 'apps', 'hydroweaver', 'test-python');
 const candidates = [];
 
-if (process.env.OPENAQUA_PYTHON?.trim()) {
-  candidates.push({ command: process.env.OPENAQUA_PYTHON.trim(), prefix: [] });
+if (process.env.HYDROWEAVER_PYTHON?.trim()) {
+  candidates.push({ command: process.env.HYDROWEAVER_PYTHON.trim(), prefix: [] });
 }
 if (process.platform === 'win32') {
   candidates.push(

@@ -1,13 +1,13 @@
 cff-version: 1.2.0
-message: "If you use OpenAqua Harness in research, cite this software and the OpenAqua paper, and report the exact OpenAqua, dataset, index, and model versions used."
+message: "If you use HydroWeaver in research, cite this software and the OpenAqua paper, and report the exact OpenAqua, dataset, index, and model versions used."
 type: software
-title: "OpenAqua Harness"
-version: "0.1.0-beta.2"
-date-released: "2026-11-02"
+title: "HydroWeaver"
+version: "0.2.0-beta.1"
+date-released: "2026-11-24"
 authors:
-  - name: "OpenAqua Harness contributors"
-repository-code: "https://github.com/zhaorui-bi/OpenAqua-Harness"
-url: "https://github.com/zhaorui-bi/OpenAqua-Harness"
+  - name: "HydroWeaver contributors"
+repository-code: "https://github.com/zhaorui-bi/HydroWeaver"
+url: "https://github.com/zhaorui-bi/HydroWeaver"
 license: MIT
 keywords:
   - water treatment

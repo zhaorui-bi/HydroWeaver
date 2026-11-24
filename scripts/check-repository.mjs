@@ -12,11 +12,11 @@ const readJson = (relativePath) =>
   JSON.parse(readFileSync(path.join(root, relativePath), 'utf8'));
 const rootPackage = readJson('package.json');
 const packageLock = readJson('package-lock.json');
-const harnessPackage = readJson('engine/apps/openaqua-harness/package.json');
+const harnessPackage = readJson('engine/apps/hydroweaver/package.json');
 
 check(rootPackage.private === true, 'root package must remain private');
 check(
-  rootPackage.name === 'openaqua-harness',
+  rootPackage.name === 'hydroweaver',
   `unexpected root package name: ${rootPackage.name}`,
 );
 check(
@@ -25,7 +25,7 @@ check(
 );
 check(
   /^\d+\.\d+\.\d+-beta\.\d+$/.test(rootPackage.version ?? ''),
-  `current OpenAqua Harness release must remain a numbered beta SemVer: ${String(rootPackage.version)}`,
+  `current HydroWeaver release must remain a numbered beta SemVer: ${String(rootPackage.version)}`,
 );
 check(rootPackage.engines?.node === '>=24.15.0', 'Node.js engine floor changed unexpectedly');
 check(
@@ -57,7 +57,7 @@ check(
 for (const relativePath of [
   'README.md',
   'README.zh-CN.md',
-  'engine/apps/openaqua-harness/README.md',
+  'engine/apps/hydroweaver/README.md',
 ]) {
   check(
     readFileSync(path.join(root, relativePath), 'utf8').includes(harnessPackage.version),
@@ -65,7 +65,7 @@ for (const relativePath of [
   );
 }
 const adapter = readFileSync(
-  path.join(root, 'engine/apps/openaqua-harness/backend/openaqua_cli.py'),
+  path.join(root, 'engine/apps/hydroweaver/backend/hydroweaver_cli.py'),
   'utf8',
 );
 const adapterVersion = /^ADAPTER_VERSION\s*=\s*["']([^"']+)["']$/m.exec(adapter)?.[1];
@@ -88,8 +88,8 @@ const requiredFiles = [
   'build/logo-256.png',
   'build/icon.ico',
   'scripts/check-adapter.mjs',
-  'engine/apps/openaqua-harness/backend/openaqua_cli.py',
-  'engine/apps/openaqua-harness/test-python/test_openaqua_cli.py',
+  'engine/apps/hydroweaver/backend/hydroweaver_cli.py',
+  'engine/apps/hydroweaver/test-python/test_hydroweaver_cli.py',
   'docs/RELEASE.md',
   'docs/SCIENTIFIC_WORKFLOWS.md',
 ];
@@ -104,11 +104,11 @@ const ignoreRules = new Set(
     .filter((line) => line !== '' && !line.startsWith('#')),
 );
 for (const rule of [
-  '/.openaqua/',
+  '/.hydroweaver/',
   '/.kimi-code/',
-  '/openaqua-data/',
+  '/hydroweaver-data/',
   '/kimi-data/',
-  '**/openaqua-jobs/',
+  '**/hydroweaver-jobs/',
   '/mcp.json',
   '/server.token',
 ]) {
@@ -122,23 +122,23 @@ const markdownFiles = [
   'CONTRIBUTING.md',
   'SECURITY.md',
   ...markdownFilesUnder('docs'),
-  'engine/apps/openaqua-harness/README.md',
+  'engine/apps/hydroweaver/README.md',
   'engine/README.md',
   'engine/README.zh-CN.md',
   'engine/CONTRIBUTING.md',
   'engine/CONTRIBUTING.zh-CN.md',
   'engine/.changeset/README.md',
-  ...markdownFilesUnder('engine/apps/openaqua-harness/skills'),
-  'engine/apps/openaqua-harness/theme/RESEARCH.md',
+  ...markdownFilesUnder('engine/apps/hydroweaver/skills'),
+  'engine/apps/hydroweaver/theme/RESEARCH.md',
 ].sort();
 for (const relativePath of markdownFiles) validateMarkdown(relativePath);
 
-const skillsRoot = path.join(root, 'engine/apps/openaqua-harness/skills');
+const skillsRoot = path.join(root, 'engine/apps/hydroweaver/skills');
 const skillNames = [];
 for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
   const relativePath = path.join(
-    'engine/apps/openaqua-harness/skills',
+    'engine/apps/hydroweaver/skills',
     entry.name,
     'SKILL.md',
   );
@@ -155,8 +155,8 @@ for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
   );
   if (name !== undefined) skillNames.push(name);
 }
-check(skillNames.includes('openaqua'), 'openaqua skill is missing');
-check(skillNames.includes('openaqua-campaign'), 'openaqua-campaign skill is missing');
+check(skillNames.includes('hydroweaver'), 'hydroweaver skill is missing');
+check(skillNames.includes('hydroweaver-campaign'), 'hydroweaver-campaign skill is missing');
 check(new Set(skillNames).size === skillNames.length, 'skill names must be unique');
 
 for (const resource of rootPackage.build?.extraResources ?? []) {
@@ -164,11 +164,11 @@ for (const resource of rootPackage.build?.extraResources ?? []) {
   check(existsSync(source), `packaged resource source missing: ${resource.from}`);
 }
 check(
-  existsSync(path.join(root, 'engine/apps/openaqua-harness/dist/search-worker.mjs')),
+  existsSync(path.join(root, 'engine/apps/hydroweaver/dist/search-worker.mjs')),
   'built global-search worker is missing; run npm run build:engine',
 );
 for (const destination of [
-  'licenses/OPENAQUA_HARNESS_LICENSE',
+  'licenses/HYDROWEAVER_LICENSE',
   'licenses/KIMI_CODE_LICENSE',
   'licenses/OPENAQUA_UPSTREAM_LICENSE',
   'licenses/THIRD_PARTY_NOTICES.md',
@@ -184,7 +184,7 @@ for (const destination of [
 
 const generatedMark = path.join(
   root,
-  'engine/apps/openaqua-harness/web-ui/openaqua-logo.png',
+  'engine/apps/hydroweaver/web-ui/hydroweaver-logo.png',
 );
 if (existsSync(generatedMark)) {
   check(
@@ -256,7 +256,7 @@ function validateTrackedFiles() {
     return;
   }
   const runtimeDirectory =
-    /(^|\/)(?:\.openaqua|\.kimi-code|openaqua-data|kimi-data|openaqua-jobs)(?:\/|$)/;
+    /(^|\/)(?:\.hydroweaver|\.kimi-code|hydroweaver-data|kimi-data|hydroweaver-jobs)(?:\/|$)/;
   const rootSecret = /^(?:\.env(?:\.|$)|mcp\.json$|server\.token$|run\.log$)/;
   for (const tracked of result.stdout.split('\0').filter(Boolean)) {
     check(

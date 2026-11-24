@@ -1,6 +1,6 @@
-"""Rebuild every OpenAqua Harness icon from the canonical brand logo.
+"""Rebuild every HydroWeaver icon from the canonical brand logo.
 
-The teal-to-blue OpenAqua artwork in ``build/logo.png`` remains the source of
+The teal-to-blue HydroWeaver artwork in ``build/logo.png`` remains the source of
 truth. This script removes its white canvas and places the resulting transparent
 mark on a bright aqua-white application tile; it never recolors the artwork.
 
@@ -66,7 +66,7 @@ def tight_bbox(img: Image.Image) -> Image.Image:
 
 
 def symbol_only(img: Image.Image) -> Image.Image:
-    """Drop the small wordmark below the standalone OpenAqua symbol."""
+    """Drop the small wordmark below the standalone HydroWeaver symbol."""
     alpha = np.asarray(img.getchannel('A'))
     row_counts = (alpha > 12).sum(axis=1)
     start = int(img.height * 0.55)
@@ -176,7 +176,7 @@ def main() -> None:
     for s in (16, 32, 128, 256, 512):
         final.resize((s, s), Image.LANCZOS).save(os.path.join(iconset, f'icon_{s}x{s}.png'))
         final.resize((s * 2, s * 2), Image.LANCZOS).save(os.path.join(iconset, f'icon_{s}x{s}@2x.png'))
-    print('icons rebuilt from', LOGO, '(canonical OpenAqua brand artwork preserved)')
+    print('icons rebuilt from', LOGO, '(canonical HydroWeaver brand artwork preserved)')
 
 
 if __name__ == '__main__':

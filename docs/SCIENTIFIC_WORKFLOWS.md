@@ -1,6 +1,6 @@
 # Engineering workflow discipline
 
-OpenAqua Harness is an execution and interaction layer around OpenAqua. It
+HydroWeaver is an execution and interaction layer around OpenAqua. It
 helps make early-stage water-treatment studies traceable; it does not turn
 retrieval, rules, or model output into a field-ready design.
 
@@ -14,8 +14,8 @@ readiness → query smoke → end-to-end smoke → bounded pilot → approved st
 
 | Stage | Purpose | Minimum evidence before advancing |
 | --- | --- | --- |
-| Readiness | Verify code, Python dependencies, processed knowledge, indexes, paths, and model configuration. | `openaqua_status` is interpretable; required data exist; indexes are non-empty. |
-| Query smoke | Verify units, taxonomy normalization, targets, constraints, and case-state readiness. | A representative query normalizes as intended without silent unit changes; `openaqua_assess_case` exposes unresolved critical or high-priority information needs. |
+| Readiness | Verify code, Python dependencies, processed knowledge, indexes, paths, and model configuration. | `hydroweaver_status` is interpretable; required data exist; indexes are non-empty. |
+| Query smoke | Verify units, taxonomy normalization, targets, constraints, and case-state readiness. | A representative query normalizes as intended without silent unit changes; `hydroweaver_assess_case` exposes unresolved critical or high-priority information needs. |
 | End-to-end smoke | Exercise retrieval, planning, critique, explanation, and output persistence. | One case produces a readable result with evidence, assumptions, uncertainty, and a durable manifest. |
 | Pilot | Estimate completion rate, latency, schema failures, evidence coverage, and model variability. | Recurring failures are diagnosed and the proposed study budget is justified. |
 | Approved study | Run the frozen comparison or WContBench subset in bounded batches. | Each branch has stable identity, complete denominators, and recoverable outputs. |
@@ -47,7 +47,7 @@ Do not silently infer:
 - applicable regulatory standards.
 
 Natural-language parsing can fill gaps when OpenRouter is configured, but those
-fields remain model-extracted assumptions until reviewed. `openaqua_assess_case`
+fields remain model-extracted assumptions until reviewed. `hydroweaver_assess_case`
 provides a deterministic screening checklist for missing information; its
 readiness status is not a calibrated probability of success, safety, or
 compliance.
@@ -69,10 +69,29 @@ A screening-ready case and a supplied flow do not establish process-sizing
 readiness. The [domain workflow](./zh-CN/DOMAIN_WORKFLOW.md) includes synthetic
 cases demonstrating screening, missing reporting bases, and blocked context.
 
+## From plausible to feasible: the closed-loop contract
+
+A plausible recommendation reads well and still violates site constraints. The
+closed loop converts plausibility into declared-constraint feasibility:
+
+1. **Generate** — the planner proposes trains, or the caller supplies candidates.
+2. **Critique** — the constraint critic reports per-chain status and violations
+   and may auto-revise a chain in place.
+3. **Revise or regenerate** — a critic revision is re-checked in the next round;
+   when a round makes no progress, the planner regenerates candidates with a
+   structured revision directive naming the failing chains and their violations.
+4. **Converge or declare** — the loop stops at `feasible`, `stalled`, or
+   `budget_exhausted`, and the record states which, with the full round trace.
+
+Preserve every round's constraint report and the final feasible trains with the
+run manifest. A chain without a machine-readable constraint report is unresolved,
+never feasible. Feasibility here means the declared rules did not reject the
+chain; it does not establish performance, target attainment, safety, or
+regulatory compliance.
+
 ## Evidence and recommendation contract
 
 Keep three evidence classes separate:
-
 1. **Retrieved evidence** — unit-level or case-level chunks returned by the
    OpenAqua retriever.
 2. **Rule results** — taxonomy, disinfection, brine, energy, and other checks
@@ -86,7 +105,7 @@ reject the chain. A high rank score is not a probability of success.
 Reports should preserve ordered unit operations, decomposed scores, citations,
 constraint revisions, dropped alternatives, assumptions, risks, and
 uncertainty. Unsupported quantitative performance claims must be omitted.
-`openaqua_audit_report` can enforce this contract structurally and produce a
+`hydroweaver_audit_report` can enforce this contract structurally and produce a
 claim–evidence ledger, but its checks do not establish semantic entailment or
 source quality.
 
@@ -105,7 +124,7 @@ preserves:
 - validated tool and operation;
 - requested parameters (excluding wait controls);
 - backend source, command, and adapter-reported version/revision when available;
-- Harness/Node/platform identity;
+- HydroWeaver/Node/platform identity;
 - adapter-reported model, retrieval, and planning settings plus explicit non-secret environment overrides;
 - regular-file input paths, sizes, timestamps, and SHA-256 hashes;
 - inline query/candidate JSON byte counts and SHA-256 hashes;
@@ -113,7 +132,7 @@ preserves:
 - stable request fingerprint;
 - completion-time output content fingerprint and completeness state.
 
-Inspect it with `openaqua_job_manifest`.
+Inspect it with `hydroweaver_job_manifest`.
 
 The request and result identities are separate. Schema version 2 recursively
 fingerprints benchmark inputs and configured outputs within explicit entry and
@@ -149,7 +168,7 @@ They do not establish process performance or compliance.
 
 ## Knowledge curation boundary
 
-`openaqua_ingest_knowledge` stages a regular JSON object under `data/ingest` and
+`hydroweaver_ingest_knowledge` stages a regular JSON object under `data/ingest` and
 can invoke index rebuilding. OpenAqua v1’s stock `IndexBuilder` reads the
 canonical unit-level TDB tree and case-level `kb_cases.json`; it does not merge
 staged records automatically.
@@ -170,12 +189,12 @@ that it appears in the generated corpus.
 
 Jobs remain discoverable after the initiating interface closes:
 
-- `openaqua_job_list` — recover IDs;
-- `openaqua_job_status` — lifecycle and timing;
-- `openaqua_job_manifest` — request provenance and output inventory;
-- `openaqua_job_log` — bounded tail, error/event filtering, or cursor traversal;
-- `openaqua_job_artifacts` — metadata below the explicit output path;
-- `openaqua_job_cancel` — bounded graceful-to-forceful cancellation.
+- `hydroweaver_job_list` — recover IDs;
+- `hydroweaver_job_status` — lifecycle and timing;
+- `hydroweaver_job_manifest` — request provenance and output inventory;
+- `hydroweaver_job_log` — bounded tail, error/event filtering, or cursor traversal;
+- `hydroweaver_job_artifacts` — metadata below the explicit output path;
+- `hydroweaver_job_cancel` — bounded graceful-to-forceful cancellation.
 
 Keep raw logs on disk and quote only enough evidence to diagnose a failure.
 Avoid busy-polling remote model or evaluation jobs.

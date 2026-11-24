@@ -2,7 +2,7 @@
 
 # 快速上手
 
-本指南完成 Harness 安装、OpenAqua 后端连接、知识库下载和第一次查询。
+本指南完成 HydroWeaver 安装、OpenAqua 后端连接、知识库下载与首次闭环查询、OpenAqua 后端连接、知识库下载和第一次查询。
 
 ## 1. 环境要求
 
@@ -11,11 +11,11 @@
 - Python 3.10+
 - macOS、Linux 或 Windows
 
-## 2. 安装 Harness
+## 2. 安装 HydroWeaver
 
 ```bash
-git clone https://github.com/zhaorui-bi/OpenAqua-Harness.git
-cd OpenAqua-Harness
+git clone https://github.com/zhaorui-bi/HydroWeaver.git
+cd HydroWeaver
 npm ci
 npm run setup
 ```
@@ -35,36 +35,36 @@ python -m pip install -U huggingface_hub
 hf download zhaorui-bi/OpenAqua data.zip WContBench/ \
   --repo-type dataset \
   --revision cc2d3c620e8ada7c62fa922cf3a827d8b42889e3 \
-  --local-dir ../hf_openaqua
-unzip ../hf_openaqua/data.zip -d .
+  --local-dir ../hf_hydroweaver
+unzip ../hf_hydroweaver/data.zip -d .
 ```
 
-压缩包已包含顶层 `data/`，请解压到 `water_treatment_agent`；解压到已有的 `data/` 会产生错误的 `data/data/` 目录。上述 Git 与数据集修订版是本 Harness 版本的验证基线；如需升级，请记录新修订版并重新运行验证。
+压缩包已包含顶层 `data/`，请解压到 `water_treatment_agent`；解压到已有的 `data/` 会产生错误的 `data/data/` 目录。上述 Git 与数据集修订版是本 HydroWeaver 版本的验证基线；如需升级，请记录新修订版并重新运行验证。
 
-WContBench 位于 `../hf_openaqua/WContBench/`。
+WContBench 位于 `../hf_hydroweaver/WContBench/`。
 
-## 4. 配置 Harness 与后端
+## 4. 配置 HydroWeaver 与后端
 
-Harness 对话智能体需要一个模型提供方；OpenAqua 内部智能体可选使用 OpenRouter。
+HydroWeaver 对话智能体需要一个模型提供方；OpenAqua 内部智能体可选使用 OpenRouter。
 
 ```bash
 export DEEPSEEK_API_KEY="YOUR_KEY"
 export OPENROUTER_API_KEY="YOUR_OPTIONAL_OPENROUTER_KEY"
 
-cd /path/to/OpenAqua-Harness
-./bin/openaqua onboard \
+cd /path/to/HydroWeaver
+./bin/hydroweaver onboard \
   --provider deepseek \
   --api-key-env DEEPSEEK_API_KEY \
-  --openaqua-repo /path/to/OpenAqua
+  --hydroweaver-repo /path/to/OpenAqua
 ```
 
-不带参数运行 `./bin/openaqua onboard` 可进入交互式向导。
+不带参数运行 `./bin/hydroweaver onboard` 可进入交互式向导。
 
 ## 5. 检查并构建索引
 
 ```bash
-./bin/openaqua doctor --probe
-./bin/openaqua run "检查 OpenAqua 状态；若知识库已下载但索引缺失，则构建索引。"
+./bin/hydroweaver doctor --probe
+./bin/hydroweaver run "检查 OpenAqua 状态；若知识库已下载但索引缺失，则构建索引。"
 ```
 
 健康状态应显示 Python 依赖可用、`taxonomy.json`/TDB/案例数据存在，并且索引非空。
@@ -72,7 +72,7 @@ cd /path/to/OpenAqua-Harness
 ## 6. 第一次查询
 
 ```bash
-./bin/openaqua run '
+./bin/hydroweaver run '
 使用 OpenAqua 评估砷浓度为 150 µg/L 的地下水。
 目标 ≤10 µg/L，预算低、运维技能低、无法处置浓水，且用于饮用。
 请归一化查询、检索证据、推荐三条工艺链，并解释约束、风险、假设和不确定性。'
@@ -81,13 +81,22 @@ cd /path/to/OpenAqua-Harness
 也可启动交互界面：
 
 ```bash
-./bin/openaqua       # 完整 TUI
-./bin/openaqua chat  # 轻量 REPL
-./bin/openaqua web   # 浏览器界面
+./bin/hydroweaver       # 完整 TUI
+./bin/hydroweaver chat  # 轻量 REPL
+./bin/hydroweaver web   # 浏览器界面
 npm start            # Electron 桌面端
 ```
 
-Windows 用户请将 `./bin/openaqua` 替换为 `npm run cli --`。
+Windows 用户请将 `./bin/hydroweaver` 替换为 `npm run cli --`。
+
+## 7. 闭合优化循环
+
+```bash
+./bin/hydroweaver optimize --input case.json --top-k 3 --max-rounds 4 --wait
+```
+
+该命令直接运行闭环优化器并打印优化记录，包括逐轮约束报告、收敛状态与可行工艺链。
+不加 `--wait` 时立即返回持久化作业 ID。
 
 ## 下一步
 

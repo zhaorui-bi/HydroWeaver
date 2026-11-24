@@ -1,3 +1,0 @@
-# Rebuilt from source by `pnpm --filter openaqua-harness build`.
-/dist/
-/web-ui/

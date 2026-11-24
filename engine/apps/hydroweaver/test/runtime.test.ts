@@ -1,0 +1,1087 @@
+import { createHash } from 'node:crypto';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import path from 'node:path';
+
+import type { Event, KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { CliArgumentError, parseCliInvocation } from '../src/cli-args';
+import { runDoctor, formatDoctorReport } from '../src/doctor';
+import { atomicWriteText } from '../src/fs-utils';
+import { createDefaultSession, promptTurnToEnd } from '../src/harness';
+import { ensureOpenAquaMcpJson, mcpEnvironment } from '../src/mcp/register';
+import { runOnboard } from '../src/onboard';
+import { resolveJobStores, resolveOpenAquaHome, resolveUserPath } from '../src/paths';
+import { validateProviderBaseUrl } from '../src/providers';
+import { openAquaTuiEnvironment } from '../src/tui';
+import {
+  findOnPath,
+  parseCommand,
+  readBackendConfig,
+  runCommand,
+  OpenAquaBackendConfigError,
+} from '../src/hydroweaver/backend';
+import {
+  cancelJob,
+  configuredJobOutput,
+  getJob,
+  jobLog,
+  listJobArtifacts,
+  listJobs,
+  readJobLog,
+  readJobRunManifest,
+  startJob,
+  waitForJob,
+} from '../src/hydroweaver/jobs';
+import { openAquaToolAnnotations, HYDROWEAVER_TOOLS } from '../src/hydroweaver/tools';
+import { readEngineeringRunManifest } from '../src/hydroweaver/provenance';
+import { runResearchCommand } from '../src/hydroweaver/research-tools';
+
+const tempDirs: string[] = [];
+const harnessVersion = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  }
+).version;
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('CLI arguments', () => {
+  it('shares the workdir store and preserves the current-directory legacy store', () => {
+    const cwd = path.resolve('/tmp/launch');
+    const workdir = path.resolve('/tmp/workspace');
+    expect(resolveJobStores({ HYDROWEAVER_WORKDIR: workdir }, cwd)).toEqual({
+      jobsRoot: path.join(workdir, 'hydroweaver-jobs'),
+      legacyJobsRoot: path.join(cwd, 'hydroweaver-jobs'),
+    });
+    expect(resolveJobStores({}, cwd)).toEqual({ jobsRoot: path.join(cwd, 'hydroweaver-jobs'), legacyJobsRoot: undefined });
+    expect(resolveJobStores({ HYDROWEAVER_WORKDIR: workdir, HYDROWEAVER_JOBS_DIR: '/tmp/explicit' }, cwd)).toEqual({ jobsRoot: path.resolve('/tmp/explicit') });
+    if (process.platform !== 'win32') {
+      const actual = makeTempDir();
+      const alias = `${actual}-link`;
+      symlinkSync(actual, alias, 'dir');
+      tempDirs.push(alias);
+      expect(resolveJobStores({ HYDROWEAVER_WORKDIR: alias }, actual).legacyJobsRoot).toBeUndefined();
+      const separate = makeTempDir();
+      mkdirSync(path.join(actual, 'hydroweaver-jobs'));
+      symlinkSync(path.join(actual, 'hydroweaver-jobs'), path.join(separate, 'hydroweaver-jobs'), 'dir');
+      expect(() => resolveJobStores({ HYDROWEAVER_WORKDIR: separate }, actual)).toThrow(/symbolic link/);
+    }
+  });
+
+  it('parses command-specific flags without consuming positionals as boolean values', () => {
+    expect(parseCliInvocation(['web', '--port', '0', '--host=127.0.0.1', '--no-open'])).toEqual({
+      kind: 'web',
+      host: '127.0.0.1',
+      port: 0,
+      noOpen: true,
+      homeDir: undefined,
+    });
+    expect(parseCliInvocation(['run', '--', '--design', 'a treatment train'])).toEqual({
+      kind: 'run',
+      prompt: '--design a treatment train',
+    });
+    expect(() => parseCliInvocation(['doctor', '--probe', 'unexpected'])).toThrow(
+      CliArgumentError,
+    );
+  });
+
+  it('rejects invalid ports, unknown flags and conflicting credentials', () => {
+    expect(() => parseCliInvocation(['web', '--port', '70000'])).toThrow(/0 to 65535/);
+    expect(() => parseCliInvocation(['doctor', '--unknown'])).toThrow(CliArgumentError);
+    expect(() =>
+      parseCliInvocation([
+        'onboard',
+        '--api-key',
+        'secret',
+        '--api-key-env',
+        'API_KEY',
+      ]),
+    ).toThrow(/cannot be used together/);
+    expect(() =>
+      parseCliInvocation([
+        'onboard',
+        '--hydroweaver-command',
+        '["python","adapter.py"]',
+        '--hydroweaver-repo',
+        '/tmp/OpenAqua',
+      ]),
+    ).toThrow(/cannot be used together/);
+  });
+
+  it('parses the closed-loop optimize command with bounded budgets', () => {
+    expect(parseCliInvocation(['optimize', '--input', 'case.json', '--top-k', '4', '--max-rounds', '5', '--wait', '--home', 'home'])).toEqual({
+      kind: 'optimize', inputFile: 'case.json', topK: 4, maxRounds: 5, wait: true, homeDir: 'home',
+    });
+    expect(parseCliInvocation(['optimize', '--input', 'case.json'])).toEqual({
+      kind: 'optimize', inputFile: 'case.json', topK: undefined, maxRounds: undefined, wait: false, homeDir: undefined,
+    });
+    for (const args of [
+      ['optimize'],
+      ['optimize', '--input', 'case.json', '--top-k', '0'],
+      ['optimize', '--input', 'case.json', '--top-k', '11'],
+      ['optimize', '--input', 'case.json', '--max-rounds', '9'],
+      ['optimize', '--input', 'case.json', '--max-rounds', 'two'],
+      ['optimize', '--input', ''],
+    ]) {
+      expect(() => parseCliInvocation(args)).toThrow(CliArgumentError);
+    }
+  });
+
+  it('parses research JSON actions and direct status or versioned advance controls', () => {    expect(parseCliInvocation(['research', 'create', '--input', 'request.json', '--home', 'home'])).toEqual({
+      kind: 'research', action: 'create', inputFile: 'request.json', taskId: undefined,
+      expectedVersion: undefined, homeDir: 'home',
+    });
+    expect(parseCliInvocation(['research', 'advance', '--id', 'research_0123456789abcdef01234567', '--expected-version', '2'])).toEqual({
+      kind: 'research', action: 'advance', inputFile: undefined, taskId: 'research_0123456789abcdef01234567',
+      expectedVersion: 2, homeDir: undefined,
+    });
+    expect(parseCliInvocation(['research', 'list'])).toMatchObject({ kind: 'research', action: 'list' });
+    expect(parseCliInvocation(['research', 'respond', '--help'])).toEqual({ kind: 'help' });
+    for (const args of [
+      ['research'],
+      ['research', 'unknown'],
+      ['research', 'status'],
+      ['research', 'create', '--id', 'research_0123456789abcdef01234567'],
+      ['research', 'advance', '--id', 'research_0123456789abcdef01234567', '--input', 'request.json'],
+      ['research', 'status', '--id', 'research_0123456789abcdef01234567', '--expected-version', '2'],
+      ['research', 'advance', '--id', 'research_0123456789abcdef01234567', '--expected-version', '0'],
+      ['research', 'advance', '--id', 'research_0123456789abcdef01234567', '--expected-version', '1.5'],
+    ]) {
+      expect(() => parseCliInvocation(args)).toThrow(CliArgumentError);
+    }
+  });
+});
+
+describe('research CLI command boundary', () => {
+  it('uses bounded JSON and shared schemas without creating research on malformed input', async () => {
+    const root = makeTempDir();
+    const ctx = { jobsRoot: path.join(root, 'jobs'), env: { HYDROWEAVER_WORKDIR: root } };
+    const inputFile = path.join(root, 'request.json');
+    for (const content of ['[]', 'null', '{', ' '.repeat(65_537)]) {
+      writeFileSync(inputFile, content);
+      expect((await runResearchCommand('list', { inputFile }, ctx)).isError).toBe(true);
+    }
+    writeFileSync(inputFile, JSON.stringify({ limit: 101 }));
+    expect((await runResearchCommand('list', { inputFile }, ctx)).isError).toBe(true);
+    writeFileSync(inputFile, JSON.stringify({ humanApproved: true }));
+    expect((await runResearchCommand('list', { inputFile }, ctx)).isError).toBe(true);
+    if (process.platform !== 'win32') {
+      const link = path.join(root, 'linked-request.json');
+      writeFileSync(inputFile, '{}');
+      symlinkSync(inputFile, link);
+      expect((await runResearchCommand('list', { inputFile: link }, ctx)).isError).toBe(true);
+    }
+    expect((await runResearchCommand('list', { inputFile: root }, ctx)).isError).toBe(true);
+    expect((await runResearchCommand('advance', { inputFile, taskId: 'research_0123456789abcdef01234567' }, ctx)).isError).toBe(true);
+    expect(existsSync(ctx.jobsRoot)).toBe(false);
+    const empty = await runResearchCommand('list', {}, ctx);
+    expect(empty.isError).toBeUndefined();
+    expect(JSON.parse(empty.content[0]?.text ?? '')).toEqual({ tasks: [], returned: 0 });
+    expect(existsSync(ctx.jobsRoot)).toBe(false);
+  });
+
+  it('shares creation, recovery, request conflicts and read-only listing across CLI and MCP handlers', async () => {
+    const root = makeTempDir();
+    const ctx = { jobsRoot: path.join(root, 'jobs'), env: { HYDROWEAVER_WORKDIR: root } };
+    const queryFile = path.join(root, 'case.json');
+    const inputFile = path.join(root, 'request.json');
+    writeFileSync(queryFile, JSON.stringify({ source_water: 'groundwater', contaminants: ['arsenic'] }));
+    const request = { requestId: 'runtime-research-case', objective: 'Screen arsenic treatment options', queryFile };
+    writeFileSync(inputFile, JSON.stringify(request));
+    const createdResult = await runResearchCommand('create', { inputFile }, ctx);
+    expect(createdResult.isError).toBeUndefined();
+    const created = JSON.parse(createdResult.content[0]?.text ?? '') as { id: string; version: number; assignments: unknown[] };
+    expect(created).toMatchObject({ id: expect.stringMatching(/^research_[a-f0-9]{24}$/), version: 1, assignments: [] });
+    const statusTool = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_research_status');
+    if (statusTool === undefined) throw new Error('research status tool is missing');
+    const status = await statusTool.run({ taskId: created.id }, ctx);
+    expect(JSON.parse(status.content[0]?.text ?? '')).toMatchObject({ id: created.id, version: created.version, assignments: [] });
+    const list = await runResearchCommand('list', {}, ctx);
+    expect(JSON.parse(list.content[0]?.text ?? '')).toMatchObject({ returned: 1, tasks: [{ id: created.id }] });
+    const summary = (JSON.parse(list.content[0]?.text ?? '') as { tasks: Record<string, unknown>[] }).tasks[0];
+    expect(summary).toMatchObject({ jobsUsed: 0, maxJobs: 6, openAttention: [], objectiveTruncated: false });
+    expect(summary).not.toHaveProperty('events');
+    expect(summary).not.toHaveProperty('queryRevisions');
+    expect(listJobs(ctx.jobsRoot)).toEqual([]);
+    const duplicate = await runResearchCommand('create', { inputFile }, ctx);
+    expect(JSON.parse(duplicate.content[0]?.text ?? '')).toMatchObject({ id: created.id, version: created.version });
+    writeFileSync(inputFile, JSON.stringify({ ...request, objective: 'A different study' }));
+    expect((await runResearchCommand('create', { inputFile }, ctx)).isError).toBe(true);
+    writeFileSync(inputFile, JSON.stringify({ ...request, maxJobs: 17 }));
+    expect((await runResearchCommand('create', { inputFile }, ctx)).isError).toBe(true);
+    expect(listJobs(ctx.jobsRoot)).toEqual([]);
+  });
+});
+
+describe('runtime paths and private persistence', () => {
+  it('expands user paths without inheriting the upstream Kimi home', () => {
+    expect(resolveUserPath('~/aqua-work')).toBe(path.join(homedir(), 'aqua-work'));
+    expect(resolveOpenAquaHome({ HYDROWEAVER_HOME: '~/aqua-home' })).toBe(
+      path.join(homedir(), 'aqua-home'),
+    );
+    expect(resolveOpenAquaHome({ KIMI_CODE_HOME: '/tmp/upstream-home' })).toBe(
+      path.join(homedir(), '.hydroweaver'),
+    );
+  });
+
+  it('launches the upstream engine under the isolated HydroWeaver TUI identity', () => {
+    expect(openAquaTuiEnvironment('/tmp/aqua-home', { PATH: '/usr/bin' })).toMatchObject({
+      PATH: '/usr/bin',
+      KIMI_CODE_HOME: '/tmp/aqua-home',
+      KIMI_CODE_NO_AUTO_UPDATE: '1',
+      KIMI_DISABLE_TELEMETRY: '1',
+      HYDROWEAVER_HOME: '/tmp/aqua-home',
+      HYDROWEAVER_TUI: '1',
+      HYDROWEAVER_VERSION: harnessVersion,
+    });
+  });
+
+  it('creates the conversational session in the same declared research workspace as MCP', async () => {
+    const workDir = makeTempDir();
+    const createSession = vi.fn().mockResolvedValue({ id: 'workspace-session' });
+    const harness = {
+      getConfig: vi.fn().mockResolvedValue({ defaultModel: 'fixture/model' }),
+      createSession,
+    } as unknown as KimiHarness;
+    vi.stubEnv('HYDROWEAVER_WORKDIR', path.relative(process.cwd(), workDir));
+    try {
+      await createDefaultSession(harness);
+      expect(createSession).toHaveBeenCalledWith({
+        workDir,
+        model: 'fixture/model',
+        permission: 'auto',
+      });
+      vi.stubEnv('HYDROWEAVER_WORKDIR', undefined);
+      await createDefaultSession(harness);
+      expect(createSession).toHaveBeenLastCalledWith({
+        workDir: process.cwd(),
+        model: 'fixture/model',
+        permission: 'auto',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('tightens an existing atomic-write target instead of preserving broad permissions', () => {
+    if (process.platform === 'win32') return;
+    const filePath = path.join(makeTempDir(), 'private.json');
+    writeFileSync(filePath, 'old', { mode: 0o666 });
+    chmodSync(filePath, 0o666);
+
+    atomicWriteText(filePath, 'new');
+
+    expect(readFileSync(filePath, 'utf8')).toBe('new');
+    expect(lstatSync(filePath).mode & 0o077).toBe(0);
+  });
+
+  it('allows local HTTP model endpoints but requires HTTPS off-machine', () => {
+    expect(validateProviderBaseUrl('http://127.0.0.1:8000/v1/')).toBe(
+      'http://127.0.0.1:8000/v1',
+    );
+    expect(validateProviderBaseUrl('https://models.example.org/v1///')).toBe(
+      'https://models.example.org/v1',
+    );
+    expect(() => validateProviderBaseUrl('http://models.example.org/v1')).toThrow(
+      /must use https/,
+    );
+    expect(() => validateProviderBaseUrl('http://127.evil.example/v1')).toThrow(
+      /must use https/,
+    );
+    expect(() => validateProviderBaseUrl('https://user:secret@example.org/v1')).toThrow(
+      /embedded credentials/,
+    );
+  });
+
+  it('onboards a clean home and passes a probed doctor report', async () => {
+    const root = makeTempDir();
+    const homeDir = path.join(root, 'home');
+    const backendScript = path.join(root, 'fake-backend.mjs');
+    writeFileSync(
+      backendScript,
+      "if (process.argv.includes('--version')) console.log('hydroweaver 0.test'); else console.log('{}');\n",
+    );
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await runOnboard({
+        yes: true,
+        homeDir,
+        hydroweaverCommand: JSON.stringify([process.execPath, backendScript]),
+        provider: 'custom',
+        providerType: 'openai',
+        baseUrl: 'http://127.0.0.1:9999/v1',
+        model: 'acceptance-model',
+        apiKeyEnv: 'HYDROWEAVER_TEST_API_KEY',
+      });
+      const report = await runDoctor({ homeDir, probe: true });
+      expect(report.healthy).toBe(true);
+      expect(report.checks.find((check) => check.name === 'default_model')).toMatchObject({
+        ok: true,
+        detail: 'custom-api/acceptance-model',
+      });
+      expect(report.checks.find((check) => check.name === 'hydroweaver_backend')).toMatchObject({
+        ok: true,
+      });
+      expect(formatDoctorReport(report)).toContain('All required checks passed.');
+      if (process.platform !== 'win32') {
+        for (const fileName of ['config.toml', 'mcp.json', 'hydroweaver.json']) {
+          expect(lstatSync(path.join(homeDir, fileName)).mode & 0o077).toBe(0);
+        }
+      }
+    } finally {
+      output.mockRestore();
+    }
+  });
+});
+
+describe('scientific chat turns', () => {
+  it('activates the HydroWeaver skill and cleans up after the active turn ends', async () => {
+    vi.useFakeTimers();
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const unsubscribe = vi.fn();
+    let emit: ((event: Event) => void) | undefined;
+    const promptWithSkills = vi.fn(async () => {
+      const identity = { agentId: 'main', sessionId: 'scientific-session' };
+      emit?.({ ...identity, type: 'turn.started', turnId: 1, origin: { kind: 'user' } });
+      emit?.({ ...identity, type: 'assistant.delta', turnId: 1, delta: 'Assessing the case.' });
+      emit?.({ ...identity, type: 'turn.ended', turnId: 2, reason: 'completed' });
+    });
+    const session = {
+      onEvent: (listener: (event: Event) => void) => {
+        emit = listener;
+        return unsubscribe;
+      },
+      promptWithSkills,
+      cancel: vi.fn(),
+    } as unknown as Session;
+    try {
+      const pending = promptTurnToEnd(session, 'Assess arsenic-bearing groundwater.');
+      await Promise.resolve();
+      expect(promptWithSkills).toHaveBeenCalledWith(
+        'Assess arsenic-bearing groundwater.',
+        [{ name: 'hydroweaver' }],
+      );
+      expect(unsubscribe).not.toHaveBeenCalled();
+      expect(stdout).toHaveBeenCalledWith('Assessing the case.');
+      emit?.({ agentId: 'main', sessionId: 'scientific-session', type: 'turn.ended', turnId: 1, reason: 'completed' });
+      await pending;
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cleans up when skill activation fails before the turn starts', async () => {
+    vi.useFakeTimers();
+    const unsubscribe = vi.fn();
+    const session = {
+      onEvent: () => unsubscribe,
+      promptWithSkills: vi.fn().mockRejectedValue(new Error('HydroWeaver skill is unavailable')),
+    } as unknown as Session;
+    try {
+      await expect(promptTurnToEnd(session, 'Assess a case.')).rejects.toThrow(
+        'HydroWeaver skill is unavailable',
+      );
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('HydroWeaver backend process handling', () => {
+  it('parses JSON and quoted command forms and rejects malformed configuration', () => {
+    expect(parseCommand('["uv","run","hydroweaver"]')).toEqual(['uv', 'run', 'hydroweaver']);
+    expect(parseCommand('uv run --project "/tmp/repo with spaces" hydroweaver')).toEqual([
+      'uv',
+      'run',
+      '--project',
+      '/tmp/repo with spaces',
+      'hydroweaver',
+    ]);
+    expect(() => parseCommand('[not-json]')).toThrow(OpenAquaBackendConfigError);
+
+    const dir = makeTempDir();
+    const configPath = path.join(dir, 'hydroweaver.json');
+    writeFileSync(configPath, '{broken');
+    expect(() => readBackendConfig(configPath)).toThrow(/left unchanged/);
+  });
+
+  it('resolves executables directly from PATH without invoking a shell', () => {
+    const dir = makeTempDir();
+    const executable = path.join(dir, 'hydroweaver-test');
+    writeFileSync(executable, '#!/bin/sh\nexit 0\n');
+    chmodSync(executable, 0o755);
+    expect(findOnPath('hydroweaver-test', { PATH: dir })).toBe(executable);
+  });
+
+  it('bounds captured output and reports spawn errors as results', async () => {
+    const output = await runCommand(
+      process.execPath,
+      ['-e', 'process.stdout.write("abcdefghijklmnop")'],
+      { maxOutputBytes: 8 },
+    );
+    expect(output.code).toBe(0);
+    expect(output.stdoutTruncated).toBe(true);
+    expect(output.stdout).toMatch(/ijklmnop$/);
+
+    const missing = await runCommand(path.join(makeTempDir(), 'missing-command'), []);
+    expect(missing.code).toBeNull();
+    expect(missing.spawnError).toBeTruthy();
+  });
+});
+
+describe('MCP configuration persistence', () => {
+  it('preserves existing servers and writes the HydroWeaver server atomically', () => {
+    const homeDir = makeTempDir();
+    const filePath = path.join(homeDir, 'mcp.json');
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ mcpServers: { existing: { command: 'example' } }, custom: true })}\n`,
+    );
+
+    expect(ensureOpenAquaMcpJson(homeDir)).toBe(filePath);
+    const config = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, any>;
+    expect(config['custom']).toBe(true);
+    expect(config['mcpServers']['existing']).toEqual({ command: 'example' });
+    expect(config['mcpServers']['hydroweaver']['env']['HYDROWEAVER_HOME']).toBe(homeDir);
+  });
+
+  it('never overwrites malformed user configuration', () => {
+    const homeDir = makeTempDir();
+    const filePath = path.join(homeDir, 'mcp.json');
+    writeFileSync(filePath, '{ malformed');
+
+    expect(() => ensureOpenAquaMcpJson(homeDir)).toThrow(/left unchanged/);
+    expect(readFileSync(filePath, 'utf8')).toBe('{ malformed');
+  });
+
+  it('forwards only the runtime overrides needed by the MCP server', () => {
+    expect(
+      mcpEnvironment('/tmp/home', {
+        HYDROWEAVER_REPO: '/tmp/repo',
+        HYDROWEAVER_WORKDIR: '/tmp/work',
+        OPENROUTER_API_KEY: 'openrouter-test-key',
+        UNRELATED_SECRET: 'do-not-copy',
+      }),
+    ).toEqual({
+      HYDROWEAVER_HOME: '/tmp/home',
+      HYDROWEAVER_REPO: '/tmp/repo',
+      HYDROWEAVER_WORKDIR: '/tmp/work',
+      OPENROUTER_API_KEY: 'openrouter-test-key',
+    });
+  });
+});
+
+describe('HydroWeaver tool catalog', () => {
+  it('publishes bounded water-treatment schemas and MCP safety annotations', () => {
+    expect(HYDROWEAVER_TOOLS).toHaveLength(25);
+    expect(new Set(HYDROWEAVER_TOOLS.map((tool) => tool.name)).size).toBe(25);
+
+    const assess = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_assess_case');
+    const audit = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_audit_report');
+    const recommend = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_recommend');
+    const constraints = HYDROWEAVER_TOOLS.find(
+      (tool) => tool.name === 'hydroweaver_check_constraints',
+    );
+    const retrievalEval = HYDROWEAVER_TOOLS.find(
+      (tool) => tool.name === 'hydroweaver_evaluate_retrieval',
+    );
+    expect(assess?.inputSchema['waterQuality']).toBeDefined();
+    expect(audit?.inputSchema['reportFile']).toBeDefined();
+    expect(recommend?.inputSchema['waterQuality']).toBeDefined();
+    expect(recommend?.inputSchema['topK']?.safeParse(11).success).toBe(false);
+    expect(constraints?.inputSchema['candidateChains']?.safeParse([]).success).toBe(false);
+    expect(retrievalEval?.inputSchema['kValues']?.safeParse([0]).success).toBe(false);
+    expect(openAquaToolAnnotations('hydroweaver_catalog')).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(openAquaToolAnnotations('hydroweaver_normalize_query')).toMatchObject({
+      readOnlyHint: true,
+      openWorldHint: true,
+    });
+    expect(openAquaToolAnnotations('hydroweaver_assess_case')).toMatchObject({
+      readOnlyHint: true,
+      openWorldHint: true,
+    });
+    expect(openAquaToolAnnotations('hydroweaver_audit_report')).toMatchObject({
+      readOnlyHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(openAquaToolAnnotations('hydroweaver_job_manifest').readOnlyHint).toBe(true);
+    expect(openAquaToolAnnotations('hydroweaver_job_cancel').destructiveHint).toBe(true);
+    expect(openAquaToolAnnotations('hydroweaver_recommend').idempotentHint).toBe(false);
+    expect(openAquaToolAnnotations('hydroweaver_research_status')).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(openAquaToolAnnotations('hydroweaver_research_list').readOnlyHint).toBe(true);
+    expect(assess?.strictInput).toBeUndefined();
+    expect(HYDROWEAVER_TOOLS.filter((tool) => tool.name.startsWith('hydroweaver_research_'))).toHaveLength(6);
+    for (const tool of HYDROWEAVER_TOOLS.filter((item) => item.name.startsWith('hydroweaver_research_'))) {
+      expect(tool.strictInput).toBe(true);
+    }
+    for (const name of ['create', 'advance', 'respond', 'cancel']) {
+      expect(openAquaToolAnnotations(`hydroweaver_research_${name}`).readOnlyHint).toBe(false);
+    }
+  });
+
+  it('fails input preflight before launching a job with a missing query file', async () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const jobsRoot = path.join(root, 'jobs');
+    mkdirSync(workDir);
+    const recommend = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_recommend');
+    if (recommend === undefined) throw new Error('recommend tool is missing');
+
+    const result = await recommend.run(
+      { queryFile: 'missing-query.json' },
+      {
+        jobsRoot,
+        env: {
+          HYDROWEAVER_COMMAND: JSON.stringify([process.execPath, '-e', 'process.exit(0)']),
+          HYDROWEAVER_WORKDIR: workDir,
+        },
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('Input preflight failed');
+    expect(listJobs(jobsRoot)).toEqual([]);
+  });
+
+  it('preserves separate results and manifests for simultaneous comparison branches', async () => {
+    const root = makeTempDir();
+    const jobsRoot = path.join(root, 'jobs');
+    const backendScript = path.join(root, 'comparison-backend.mjs');
+    writeFileSync(
+      backendScript,
+      [
+        'import fs from "node:fs";',
+        'import path from "node:path";',
+        'const args = process.argv.slice(2);',
+        'const outputIndex = args.indexOf("--output");',
+        'if (outputIndex >= 0) {',
+        '  const output = args[outputIndex + 1];',
+        '  const query = JSON.parse(args[args.indexOf("--query-json") + 1]);',
+        '  fs.mkdirSync(path.dirname(output), { recursive: true });',
+        '  fs.writeFileSync(output, JSON.stringify({ branch: query.raw_query }));',
+        '} else console.log(args.includes("--version") ? "fixture-backend" : "{}");',
+      ].join('\n'),
+    );
+    const recommend = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_recommend');
+    if (recommend === undefined) throw new Error('recommend tool is missing');
+    const clock = vi.spyOn(Date.prototype, 'toISOString').mockReturnValue('2026-11-02T00:00:00.000Z');
+    try {
+      const results = await Promise.all(
+        ['baseline', 'comparison'].map((branch) =>
+          recommend.run(
+            { rawQuery: branch, wait: true, waitTimeoutMs: 10_000 },
+            {
+              jobsRoot,
+              env: {
+                HYDROWEAVER_COMMAND: JSON.stringify([process.execPath, backendScript]),
+                HYDROWEAVER_WORKDIR: root,
+              },
+            },
+          ),
+        ),
+      );
+      const jobs = results.map((result) => {
+        expect(result.isError).not.toBe(true);
+        return (JSON.parse(result.content[0].text) as {
+          job: { jobId: string; status: string; configuredOutput: string };
+        }).job;
+      });
+      expect(jobs[0]?.configuredOutput).not.toBe(jobs[1]?.configuredOutput);
+      for (const [index, job] of jobs.entries()) {
+        expect(job.status).toBe('succeeded');
+        const outputText = readFileSync(job.configuredOutput, 'utf8');
+        expect(JSON.parse(outputText)).toEqual({ branch: ['baseline', 'comparison'][index] });
+        const manifest = readJobRunManifest(jobsRoot, job.jobId)?.manifest;
+        expect(manifest?.configuredOutput).toBe(job.configuredOutput);
+        expect(manifest?.result?.output.sha256).toBe(
+          createHash('sha256').update(outputText).digest('hex'),
+        );
+      }
+    } finally {
+      clock.mockRestore();
+    }
+  }, 15_000);
+});
+
+describe('background jobs', () => {
+  it('continues to read schema-version-1 engineering manifests', () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const filePath = path.join(root, 'run-manifest.json');
+    const fingerprintPayload = {
+      schemaVersion: 1,
+      toolName: 'hydroweaver_recommend',
+      operation: 'recommend',
+      backend: { source: 'configured-command', command: ['hydroweaver'] },
+      command: ['hydroweaver', 'recommend'],
+      workDir,
+      configuredOutput: null,
+      requestedParameters: {},
+      inputs: [],
+      payloads: [],
+    };
+    const manifest = {
+      schemaVersion: 1,
+      kind: 'hydroweaver.engineering-run',
+      jobId: 'job_20200101000000_abcdef',
+      createdAt: '2020-01-01T00:00:00.000Z',
+      toolName: 'hydroweaver_recommend',
+      operation: 'recommend',
+      workDir,
+      command: ['hydroweaver', 'recommend'],
+      backend: { source: 'configured-command', command: ['hydroweaver'] },
+      runtime: {
+        harnessVersion: '0.1.0',
+        nodeVersion: process.version,
+        platform: process.platform,
+        architecture: process.arch,
+      },
+      parameters: {
+        resolution: 'requested-only',
+        values: {},
+        note: 'legacy manifest fixture',
+      },
+      inputs: [],
+      payloads: [],
+      inputIntegrityComplete: true,
+      requestSha256: createHash('sha256')
+        .update(canonicalJsonForTest(fingerprintPayload))
+        .digest('hex'),
+    };
+    writeFileSync(filePath, JSON.stringify(manifest));
+
+    expect(readEngineeringRunManifest(filePath)).toMatchObject({
+      manifest: { schemaVersion: 1, requestSha256: manifest.requestSha256 },
+    });
+  });
+
+  it('persists engineering request provenance with content fingerprints', async () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const jobsRoot = path.join(root, 'jobs');
+    const queryPath = path.join(workDir, 'query.json');
+    mkdirSync(workDir);
+    const queryText = `${JSON.stringify({
+      source_water: 'groundwater',
+      contaminants: ['arsenic'],
+      treatment_targets: { arsenic_ug_L: 10 },
+      constraints: { brine_disposal: false, use_for_drinking: true },
+    })}\n`;
+    writeFileSync(queryPath, queryText);
+    const recommend = HYDROWEAVER_TOOLS.find((tool) => tool.name === 'hydroweaver_recommend');
+    if (recommend === undefined) throw new Error('recommend tool is missing');
+
+    const launched = await recommend.run(
+      {
+        queryFile: 'query.json',
+        topK: 2,
+        output: 'recommendations.json',
+        wait: false,
+      },
+      {
+        jobsRoot,
+        env: {
+          HYDROWEAVER_COMMAND: JSON.stringify([
+            process.execPath,
+            '-e',
+            [
+              'const fs = require("node:fs")',
+              'const index = process.argv.indexOf("--output")',
+              'if (index >= 0) fs.writeFileSync(process.argv[index + 1], "{\\"ok\\":true}\\n")',
+              'else if (process.argv.includes("identity")) process.stdout.write(JSON.stringify({ models: { planner_model: "fixture/planner", api_key: "must-not-persist" }, retrieval: { top_k_retrieval: 10 } }))',
+              'else process.stdout.write(process.version)',
+            ].join(';'),
+          ]),
+          HYDROWEAVER_WORKDIR: workDir,
+          HYDROWEAVER_PLANNER_MODEL: 'environment/planner',
+          OPENROUTER_API_KEY: 'must-not-persist',
+        },
+      },
+    );
+    const content = launched.content[0];
+    if (content === undefined) throw new Error('recommend tool returned no content');
+    const payload = JSON.parse(content.text) as { job: { jobId: string } };
+    const jobId = payload.job.jobId;
+    const finished = await waitForJob(jobsRoot, jobId, 10_000, 20);
+    expect(finished?.status).toBe('succeeded');
+
+    const engineering = readJobRunManifest(jobsRoot, jobId);
+    expect(engineering?.error).toBeUndefined();
+    expect(engineering?.manifest).toMatchObject({
+      schemaVersion: 2,
+      kind: 'hydroweaver.engineering-run',
+      jobId,
+      toolName: 'hydroweaver_recommend',
+      operation: 'recommend',
+      configuredOutput: path.join(workDir, 'recommendations.json'),
+      inputIntegrityComplete: true,
+    });
+    expect(engineering?.manifest?.backend.version).toBe(process.version);
+    expect(engineering?.manifest?.parameters.resolution).toBe('requested-only');
+    expect(engineering?.manifest?.parameters.values['wait']).toBeUndefined();
+    expect(engineering?.manifest?.parameters.values['topK']).toBe(2);
+    expect(engineering?.manifest?.scientificConfiguration?.values).toMatchObject({
+      adapterReported: {
+        models: { planner_model: 'fixture/planner' },
+        retrieval: { top_k_retrieval: 10 },
+      },
+      environmentOverrides: {
+        HYDROWEAVER_PLANNER_MODEL: 'environment/planner',
+      },
+    });
+    expect(JSON.stringify(engineering?.manifest?.scientificConfiguration)).not.toContain(
+      'must-not-persist',
+    );
+    expect(engineering?.manifest?.inputs[0]).toMatchObject({
+      role: 'query',
+      path: queryPath,
+      kind: 'file',
+      sizeBytes: Buffer.byteLength(queryText),
+    });
+    expect(engineering?.manifest?.inputs[0]?.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(engineering?.manifest?.requestSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(engineering?.manifest?.result).toMatchObject({
+      output: {
+        role: 'configured-output',
+        path: path.join(workDir, 'recommendations.json'),
+        kind: 'file',
+      },
+    });
+    expect(engineering?.manifest?.result?.output.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(engineering?.manifest?.result?.resultSha256).toMatch(/^[a-f0-9]{64}$/);
+
+    const manifestTool = HYDROWEAVER_TOOLS.find(
+      (tool) => tool.name === 'hydroweaver_job_manifest',
+    );
+    if (manifestTool === undefined) throw new Error('job manifest tool is missing');
+    const inspected = await manifestTool.run({ jobId }, { jobsRoot, env: {} });
+    const inspectedContent = inspected.content[0];
+    if (inspectedContent === undefined) throw new Error('manifest tool returned no content');
+    expect(JSON.parse(inspectedContent.text)).toMatchObject({
+      engineeringRun: {
+        jobId,
+        inputIntegrityComplete: true,
+        result: { output: { kind: 'file' } },
+      },
+      artifacts: { exists: true },
+    });
+
+    const manifestPath = path.join(finished!.dir, 'run-manifest.json');
+    if (process.platform !== 'win32') {
+      expect(lstatSync(manifestPath).mode & 0o077).toBe(0);
+    }
+    const original = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    const configurationTampered = structuredClone(original);
+    const scientificConfiguration = configurationTampered[
+      'scientificConfiguration'
+    ] as Record<string, unknown>;
+    const scientificValues = scientificConfiguration['values'] as Record<string, unknown>;
+    scientificValues['environmentOverrides'] = { HYDROWEAVER_PLANNER_MODEL: 'tampered' };
+    writeFileSync(manifestPath, JSON.stringify(configurationTampered));
+    expect(readJobRunManifest(jobsRoot, jobId)?.error).toMatch(/fingerprint/);
+
+    const resultTampered = structuredClone(original);
+    const result = resultTampered['result'] as Record<string, unknown>;
+    const resultOutput = result['output'] as Record<string, unknown>;
+    resultOutput['sha256'] = '0'.repeat(64);
+    writeFileSync(manifestPath, JSON.stringify(resultTampered));
+    expect(readJobRunManifest(jobsRoot, jobId)?.error).toMatch(/schema/);
+
+    const tampered = structuredClone(original);
+    tampered['operation'] = 'tampered';
+    writeFileSync(manifestPath, JSON.stringify(tampered));
+    expect(readJobRunManifest(jobsRoot, jobId)?.error).toMatch(/fingerprint/);
+    expect((await manifestTool.run({ jobId }, { jobsRoot, env: {} })).isError).toBe(true);
+  }, 15_000);
+
+  it('recursively fingerprints benchmark directories for comparable evaluations', async () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const jobsRoot = path.join(root, 'jobs');
+    const benchmarkDir = path.join(workDir, 'benchmark');
+    const splitDir = path.join(benchmarkDir, 'test');
+    const predictions = path.join(workDir, 'predictions.json');
+    mkdirSync(splitDir, { recursive: true });
+    writeFileSync(path.join(splitDir, 'case.json'), '{"case_id":"case-1"}\n');
+    writeFileSync(predictions, '[]\n');
+    const evaluate = HYDROWEAVER_TOOLS.find(
+      (tool) => tool.name === 'hydroweaver_evaluate_trains',
+    );
+    if (evaluate === undefined) throw new Error('train evaluation tool is missing');
+    const ctx = {
+      jobsRoot,
+      env: {
+        HYDROWEAVER_COMMAND: JSON.stringify([
+          process.execPath,
+          '-e',
+          'process.stdout.write("{}")',
+        ]),
+        HYDROWEAVER_WORKDIR: workDir,
+      },
+    };
+
+    const firstLaunch = await evaluate.run(
+      {
+        benchmarkDir: 'benchmark',
+        predictions: 'predictions.json',
+        output: 'first.json',
+      },
+      ctx,
+    );
+    const firstContent = firstLaunch.content[0];
+    if (firstContent === undefined) throw new Error('first evaluation returned no content');
+    const firstPayload = JSON.parse(firstContent.text) as { job: { jobId: string } };
+    await waitForJob(jobsRoot, firstPayload.job.jobId, 10_000, 20);
+    const first = readJobRunManifest(jobsRoot, firstPayload.job.jobId)?.manifest;
+    const firstBenchmark = first?.inputs.find((input) => input.role === 'benchmark');
+    expect(first?.inputIntegrityComplete).toBe(true);
+    expect(firstBenchmark).toMatchObject({
+      kind: 'directory',
+      entryCount: 2,
+      fileCount: 1,
+      integrityComplete: true,
+      truncated: false,
+    });
+    expect(firstBenchmark?.sha256).toMatch(/^[a-f0-9]{64}$/);
+
+    writeFileSync(path.join(splitDir, 'case.json'), '{"case_id":"case-1","changed":true}\n');
+    const secondLaunch = await evaluate.run(
+      {
+        benchmarkDir: 'benchmark',
+        predictions: 'predictions.json',
+        output: 'second.json',
+      },
+      ctx,
+    );
+    const secondContent = secondLaunch.content[0];
+    if (secondContent === undefined) throw new Error('second evaluation returned no content');
+    const secondPayload = JSON.parse(secondContent.text) as { job: { jobId: string } };
+    await waitForJob(jobsRoot, secondPayload.job.jobId, 10_000, 20);
+    const second = readJobRunManifest(jobsRoot, secondPayload.job.jobId)?.manifest;
+    const secondBenchmark = second?.inputs.find((input) => input.role === 'benchmark');
+    expect(secondBenchmark?.sha256).not.toBe(firstBenchmark?.sha256);
+    expect(second?.requestSha256).not.toBe(first?.requestSha256);
+  }, 15_000);
+
+  it('lists and accesses older jobs beside the workspace job store', async () => {
+    const root = makeTempDir();
+    const jobsRoot = path.join(root, 'current-jobs');
+    const legacyJobsRoot = path.join(root, 'legacy-jobs');
+    const oldJob = startJob(legacyJobsRoot, [process.execPath, '-e', "console.log('legacy output')"], { workDir: root });
+    const newJob = startJob(jobsRoot, [process.execPath, '-e', "console.log('current output')"], { workDir: root });
+    await Promise.all([waitForJob(legacyJobsRoot, oldJob.id, 10_000, 20), waitForJob(jobsRoot, newJob.id, 10_000, 20)]);
+    const ctx = { jobsRoot, legacyJobsRoot, env: {} };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const tool = HYDROWEAVER_TOOLS.find((entry) => entry.name === `hydroweaver_job_${name}`)!;
+      return tool.run(args, ctx);
+    };
+    const listed = await call('list', {});
+    expect(JSON.parse(listed.content[0].text).jobs.map((job: { jobId: string }) => job.jobId).toSorted()).toEqual([oldJob.id, newJob.id].toSorted());
+    for (const name of ['status', 'manifest', 'log', 'artifacts', 'cancel']) {
+      const result = await call(name, { jobId: oldJob.id });
+      expect(result.isError, name).not.toBe(true);
+    }
+    const log = await call('log', { jobId: oldJob.id });
+    expect(log.content[0].text).toContain('legacy output');
+    cpSync(path.join(legacyJobsRoot, oldJob.id), path.join(jobsRoot, oldJob.id), { recursive: true });
+    expect((await call('list', {})).isError).toBe(true);
+    expect((await call('status', { jobId: oldJob.id })).isError).toBe(true);
+  }, 15_000);
+
+  it('runs through the detached runner and exposes bounded, cursor-based log views', async () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const jobsRoot = path.join(root, 'jobs');
+    const output = 'started\nnoise\nERROR exploded\ncompleted\n';
+    mkdirSync(workDir);
+
+    const started = startJob(
+      jobsRoot,
+      [process.execPath, '-e', `process.stdout.write(${JSON.stringify(output)})`],
+      { workDir, label: 'test-run' },
+    );
+    const finished = await waitForJob(jobsRoot, started.id, 10_000, 20);
+
+    expect(finished?.status).toBe('succeeded');
+    expect(finished?.finishedAt).toBeTruthy();
+    expect(finished?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(jobLog(jobsRoot, started.id, 10)).toMatch(/completed\n$/);
+
+    const first = readJobLog(jobsRoot, started.id, {
+      cursor: 0,
+      maxBytes: 1_000,
+      maxLines: 2,
+    });
+    expect(first?.text).toBe('started\nnoise\n');
+    expect(first?.nextCursor).toBe(Buffer.byteLength('started\nnoise\n'));
+
+    const second = readJobLog(jobsRoot, started.id, {
+      cursor: first?.nextCursor,
+      maxBytes: 1_000,
+      maxLines: 2,
+    });
+    expect(second?.text).toBe('ERROR exploded\ncompleted\n');
+    expect(second?.nextCursor).toBeUndefined();
+
+    const errors = readJobLog(jobsRoot, started.id, {
+      cursor: 0,
+      maxBytes: 1_000,
+      view: 'errors',
+    });
+    expect(errors?.text).toBe('ERROR exploded\n');
+    expect(errors?.matchedLines).toBe(1);
+
+    expect(getJob(jobsRoot, '../job_20200101000000_abcdef')).toBeUndefined();
+    expect(readJobLog(jobsRoot, '../../etc/passwd')).toBeUndefined();
+    if (process.platform !== 'win32') {
+      if (finished === undefined) throw new Error('job snapshot missing after completion');
+      expect(lstatSync(finished.dir).mode & 0o077).toBe(0);
+      const outside = path.join(root, 'outside');
+      const symlinkId = 'job_20200101000000_abcdef';
+      mkdirSync(outside);
+      writeFileSync(
+        path.join(outside, 'job.json'),
+        JSON.stringify({
+          id: symlinkId,
+          command: ['echo', 'unsafe'],
+          workDir,
+          pid: -1,
+          startedAt: new Date().toISOString(),
+        }),
+      );
+      symlinkSync(outside, path.join(jobsRoot, symlinkId), 'dir');
+      expect(getJob(jobsRoot, symlinkId)).toBeUndefined();
+    }
+  }, 15_000);
+
+  it('recovers recent jobs and lists bounded output metadata without following links', async () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const jobsRoot = path.join(root, 'jobs');
+    const outputDir = path.join(workDir, 'results');
+    mkdirSync(workDir);
+    const script = [
+      'const fs = require("node:fs")',
+      `fs.mkdirSync(${JSON.stringify(outputDir)}, { recursive: true })`,
+      `fs.writeFileSync(${JSON.stringify(path.join(outputDir, 'result.txt'))}, "result")`,
+    ].join(';');
+
+    const started = startJob(
+      jobsRoot,
+      [process.execPath, '-e', script, '--', '--output', outputDir],
+      { workDir, label: 'artifacts' },
+    );
+    const finished = await waitForJob(jobsRoot, started.id, 10_000, 20);
+    expect(finished?.status).toBe('succeeded');
+    expect(listJobs(jobsRoot)[0]?.id).toBe(started.id);
+
+    if (process.platform !== 'win32') {
+      const external = path.join(root, 'external-secret.txt');
+      writeFileSync(external, 'do not read');
+      symlinkSync(external, path.join(outputDir, 'external-link'));
+    }
+    const listing = listJobArtifacts(jobsRoot, started.id, { maxEntries: 10 });
+    expect(listing?.root).toBe(outputDir);
+    expect(
+      configuredJobOutput({
+        ...started,
+        command: ['hydroweaver', '--output', 'first', '--output=last'],
+      }),
+    ).toBe(path.join(workDir, 'last'));
+    expect(listing?.entries.some((entry) => entry.relativePath === 'result.txt')).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(
+        listing?.entries.find((entry) => entry.relativePath === 'external-link')?.type,
+      ).toBe('symlink');
+    }
+    expect(listJobArtifacts(jobsRoot, started.id, { maxEntries: 1 })?.truncated).toBe(
+      process.platform !== 'win32',
+    );
+  }, 15_000);
+
+  it('refuses to cancel an unrelated process referenced by a stale job record', async () => {
+    const root = makeTempDir();
+    const jobsRoot = path.join(root, 'jobs');
+    const jobId = 'job_20200101000000_deadbeef';
+    const jobDir = path.join(jobsRoot, jobId);
+    mkdirSync(jobDir, { recursive: true });
+    writeFileSync(
+      path.join(jobDir, 'job.json'),
+      JSON.stringify({
+        id: jobId,
+        command: ['hydroweaver', 'recommend'],
+        workDir: root,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+      }),
+    );
+
+    await expect(cancelJob(jobsRoot, jobId)).rejects.toThrow(/no longer matches this job/);
+  });
+
+  it('cancels a process tree with a bounded graceful-to-forceful shutdown', async () => {
+    const root = makeTempDir();
+    const workDir = path.join(root, 'work');
+    const jobsRoot = path.join(root, 'jobs');
+    mkdirSync(workDir);
+    const started = startJob(
+      jobsRoot,
+      [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+      { workDir, label: 'cancel-test' },
+    );
+
+    const cancelled = await cancelJob(jobsRoot, started.id);
+    expect(cancelled?.status).toBe('cancelled');
+    expect(getJob(jobsRoot, started.id)?.status).toBe('cancelled');
+  }, 15_000);
+});
+
+function canonicalJsonForTest(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJsonForTest(entry)).join(',')}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .toSorted(([left], [right]) => left.localeCompare(right));
+  return `{${entries
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJsonForTest(entry)}`)
+    .join(',')}}`;
+}
+
+function makeTempDir(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'hydroweaver-test-'));
+  tempDirs.push(dir);
+  return dir;
+}

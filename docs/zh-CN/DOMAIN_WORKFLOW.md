@@ -1,9 +1,9 @@
-# 面向水处理研究的 Harness 工作流
+# 面向水处理研究的 HydroWeaver 工作流
 
-OpenAqua Harness 以水处理案例为工作单元，围绕 OpenAqua 五智能体流水线，
+HydroWeaver 以水处理案例为工作单元，围绕 OpenAqua 五智能体流水线，
 组织案例补全、证据适用性检查、候选工艺比较和可追溯交付。
 原 [OpenAqua 论文](https://doi.org/10.1016/j.watres.2026.126761) 已覆盖需求解析、
-分层检索、规划、约束审查与解释。Harness 的领域价值需要通过研究过程的完整性与
+分层检索、规划、约束审查与解释。HydroWeaver 的领域价值需要通过研究过程的完整性与
 可审查性来验证；仅增加界面或工具数量不足以证明新的科学贡献。
 
 ## 案例到报告
@@ -17,21 +17,24 @@ OpenAqua Harness 以水处理案例为工作单元，围绕 OpenAqua 五智能�
                        ↓
                候选工艺与规则审查
                        ↓
+               闭环优化：可行工艺链
+                       ↓
                报告审计与研究交付
 ```
 
 | 阶段 | 已有入口 | 进入下一阶段的条件 |
 | --- | --- | --- |
-| 运行准备 | `openaqua_status`、`openaqua_catalog` | 后端、数据、索引和分类名称可用。 |
-| 案例评估 | `openaqua_assess_case` | 核心阻断已解决；仍存在的信息缺口被明确展示。 |
-| 证据检索 | `openaqua_retrieve_evidence` | 明确来源、片段与适用条件，区分检索结果与研究者判断。 |
-| 方案比较 | `openaqua_recommend`、`openaqua_check_constraints` | 保留有序工艺链、规则结果、修订和未解决约束。 |
-| 报告审计 | `openaqua_audit_report` | 查看报告中的 `status` 和问题清单；任务执行成功不等于审计通过。 |
-| 交付 | `openaqua_job_manifest`、`openaqua_job_artifacts` | 案例、报告、证据、任务与版本/指纹可对应。 |
+| 运行准备 | `hydroweaver_status`、`hydroweaver_catalog` | 后端、数据、索引和分类名称可用。 |
+| 案例评估 | `hydroweaver_assess_case` | 核心阻断已解决；仍存在的信息缺口被明确展示。 |
+| 证据检索 | `hydroweaver_retrieve_evidence` | 明确来源、片段与适用条件，区分检索结果与研究者判断。 |
+| 方案比较 | `hydroweaver_recommend`、`hydroweaver_check_constraints` | 保留有序工艺链、规则结果、修订和未解决约束。 |
+| 闭环优化 | `hydroweaver_optimize_trains` | 逐轮保留约束报告与违规项；`feasible` 只代表通过声明约束的机器检查，`stalled`/`budget_exhausted` 不得表述为可行。 |
+| 报告审计 | `hydroweaver_audit_report` | 查看报告中的 `status` 和问题清单；任务执行成功不等于审计通过。 |
+| 交付 | `hydroweaver_job_manifest`、`hydroweaver_job_artifacts` | 案例、报告、证据、任务与版本/指纹可对应。 |
 
 这些步骤通过工具和智能体操作指引组织。`recommend` 保持可直接调用；
 它不是一个能阻止所有越级操作的强制状态机。CLI 的 `run`/`chat` 显式激活
-OpenAqua 操作技能；Web/桌面使用领域指引；TUI 可用 `/openaqua` 激活同一技能。
+OpenAqua 操作技能；Web/桌面使用领域指引；TUI 可用 `/hydroweaver` 激活同一技能。
 
 `blocked` 表示存在关键问题，应先澄清，或明确限定为探索性检索。
 `needs_information` 表示仍缺重要信息；应优先补全，条件性技术清单不能被表述为
@@ -53,7 +56,7 @@ MCP 内联参数使用 `waterQuality`、`treatmentTargets` 和 `sourceWater`；
 负浓度、非有限值等作为关键问题；普通水体系中超常 pH 要求核实，
 不把 0–14 当作所有溶液的绝对物理边界。
 
-所使用的上游解析器会丢弃部分显式 `extra`。Harness 在适配层保留这些上下文，
+所使用的上游解析器会丢弃部分显式 `extra`。HydroWeaver 在适配层保留这些上下文，
 并通过 `context_preservation` 说明范围。保留字段不代表上游规划器已经使用它，
 也不代表约束审查器已经实现对应规则。报告必须继续展示这部分未验证条件。
 
@@ -77,17 +80,17 @@ MCP 内联参数使用 `waterQuality`、`treatmentTargets` 和 `sourceWater`；
 
 ```text
 读取 examples/cases/nitrate-basis-unknown.json，使用 queryFile 调用
-openaqua_assess_case。展示关键阻断和最高优先级的信息需求。
+hydroweaver_assess_case。展示关键阻断和最高优先级的信息需求。
 不要替我猜测计量基准；在澄清前仅整理证据需求。
 ```
 
-补全并确认案例后，再要求检索、推荐和审计；返回 `jobId`、结果路径、审计状态与
+补全并确认案例后，再要求检索、推荐、闭环优化和审计；返回 `jobId`、结果路径、优化状态、审计状态与
 清单指纹。完整结果应说明证据对应的原水基质、价态、规模、运行条件及残余物处置，
 并清楚区分“检索到了”“规则未拒绝”和“现场适用性已经验证”。
 
 ## 后续研究如何验证
 
-可比较原 OpenAqua 与使用这些工作流的 Harness，在相同案例、知识快照、模型、
+可比较原 OpenAqua 与使用这些工作流的 HydroWeaver，在相同案例、知识快照、模型、
 预算和评价条件下，测量：单位/计量基准错误检出、关键缺失信息识别、
 不适用证据被接受的比例、无效审计通过率，以及完整交付与恢复成功率。
 需要人工标注的工程适用性应由领域专家评审，并报告一致性与分歧。

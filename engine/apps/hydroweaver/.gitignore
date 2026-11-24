@@ -1,0 +1,3 @@
+# Rebuilt from source by `pnpm --filter hydroweaver build`.
+/dist/
+/web-ui/

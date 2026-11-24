@@ -39,7 +39,7 @@ if (result.status !== 0 && result.status !== 1) {
 }
 
 // These workspaces are upstream development/documentation surfaces and are not
-// built into the OpenAqua CLI, Web UI, MCP server, or desktop application.
+// built into the HydroWeaver CLI, Web UI, MCP server, or desktop application.
 const nonShippedRoots = new Set(['apps__vscode', 'docs']);
 const runtimeAdvisories = new Map();
 const excludedAdvisories = new Set();

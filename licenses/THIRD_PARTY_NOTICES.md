@@ -2,7 +2,7 @@
 
 # Third-party notices
 
-OpenAqua Harness bundles the open-source Kimi Code engine, OpenAqua-derived brand assets,
+HydroWeaver bundles the open-source Kimi Code engine, OpenAqua-derived brand assets,
 its production dependency graph, Electron, and self-hosted fonts. This file records package metadata and license or notice
 texts available in the installed dependency trees at build time.
 

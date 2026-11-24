@@ -15,7 +15,7 @@ release. The latest tagged release is the supported packaged version.
 
 Please use GitHub's private security-advisory form:
 
-https://github.com/zhaorui-bi/OpenAqua-Harness/security/advisories/new
+https://github.com/zhaorui-bi/HydroWeaver/security/advisories/new
 
 Do not open a public issue for an unpatched vulnerability. Include the affected
 version or commit, operating system, reproduction steps, impact, and any safe
@@ -24,7 +24,7 @@ private source-water or facility data, unpublished knowledge records, session da
 
 ## Security boundary
 
-OpenAqua Harness runs local agent and engineering processes with the current
+HydroWeaver runs local agent and engineering processes with the current
 user's permissions. Chromium sandboxing protects the Electron renderer; it is
 not a sandbox for model-directed backend tools. Researchers should use a
 dedicated workspace, review index rebuilds, knowledge staging, evaluations, and
@@ -33,5 +33,5 @@ JSON/data files outside sensitive directories.
 
 The application stores configuration and job logs locally. These may contain
 provider details, file paths, water-quality inputs, facility constraints,
-retrieved evidence, model output, or other confidential research metadata. Keep the OpenAqua home and job directories private and do
+retrieved evidence, model output, or other confidential research metadata. Keep the HydroWeaver home and job directories private and do
 not commit them.
