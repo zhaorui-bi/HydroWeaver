@@ -109,10 +109,19 @@ def extract_constraints(case: dict[str, Any]) -> dict[str, Any]:
         ("lead_ug_L", "lead_ug_L"),
         ("boron_mg_L", "boron_mg_L"),
         ("silica_mg_L", "silica_mg_L"),
+        ("cod_mg_L", "cod_mg_L"),
+        ("bod5_mg_L", "bod5_mg_L"),
+        ("tss_mg_L", "tss_mg_L"),
+        ("tn_mg_L", "tn_mg_L"),
+        ("nh4_mg_L", "nh4_mg_L"),
     ):
         val = targets.get(key) if targets.get(key) is not None else target_extra.get(key)
         if val is not None and not isinstance(val, bool):
             wq_limits[stream_key] = float(val)
+    if target_extra.get("tn_mg_N_L") is not None and not isinstance(target_extra.get("tn_mg_N_L"), bool):
+        wq_limits.setdefault("tn_mg_L", float(target_extra["tn_mg_N_L"]))
+    if target_extra.get("nh4_mg_N_L") is not None and not isinstance(target_extra.get("nh4_mg_N_L"), bool):
+        wq_limits.setdefault("nh4_mg_L", float(target_extra["nh4_mg_N_L"]))
 
     use_for_drinking = constraints.get("use_for_drinking")
     if use_for_drinking is None:
@@ -232,9 +241,14 @@ def simulate_train(
 
     cfg = extract_constraints(case)
     wq = case.get("water_quality") if isinstance(case.get("water_quality"), dict) else {}
+    wq_extra = wq.get("extra") if isinstance(wq.get("extra"), dict) else {}
     effective_params = _clamp_params(ordered, params, case)
     flow_in = cfg["design_flow_m3_day"]
     temp_c = _safe_float(wq.get("temperature_C"), 20.0)
+
+    def _wq_num(field: str, default: float) -> float:
+        raw = wq.get(field) if wq.get(field) is not None else wq_extra.get(field)
+        return _safe_float(raw, default)
 
     state: dict[str, Any] = {
         "flow_m3_day": flow_in,
@@ -255,6 +269,15 @@ def simulate_train(
         "lead_ug_L": _safe_float(wq.get("lead_ug_L"), 0.0),
         "boron_mg_L": _safe_float(wq.get("boron_mg_L"), 0.0),
         "silica_mg_L": _safe_float(wq.get("silica_mg_L"), 10.0),
+        "cod_mg_L": _wq_num("cod_mg_L", 0.0),
+        "bod5_mg_L": _wq_num("bod5_mg_L", 0.0),
+        "tss_mg_L": _wq_num("tss_mg_L", 0.0),
+        "tn_mg_L": _wq_num("tn_mg_L", 0.0),
+        "nh4_mg_L": _wq_num("nh4_mg_L", 0.0),
+        "bio_nitrate_mg_L": 0.0,
+        "mlss_mg_L": 0.0,
+        "biogas_m3_day": 0.0,
+        "bio_biomass_settled": False,
         "disinfection_log_reduction": 0.0,
         "coag_destabilized": False,
         "brine_pressure_bar": 0.0,
@@ -845,6 +868,199 @@ def simulate_train(
                 unit_footprint = max(8.0, brine_in * 0.06)
                 unit_extra = {"distillate_recovered_m3_day": round(distillate, 2), "residual_brine_m3_day": round(residual_brine, 2)}
 
+        elif unit_name == "Primary Clarifier":
+            sor = up["surface_overflow_rate_m_h"]
+            rem_tss = max(0.30, min(0.65, 0.62 - 0.10 * (sor - 1.0)))
+            state["tss_mg_L"] *= (1.0 - rem_tss)
+            state["cod_mg_L"] *= (1.0 - 0.55 * rem_tss)
+            state["bod5_mg_L"] *= (1.0 - 0.45 * rem_tss)
+            particulate_n = max(0.0, state["tn_mg_L"] - state["nh4_mg_L"]) * 0.45
+            state["tn_mg_L"] = max(state["nh4_mg_L"], state["tn_mg_L"] - particulate_n * rem_tss)
+            state["sludge_kg_day"] += unit_flow * (inlet_snapshot["tss_mg_L"] * rem_tss) * 1e-3
+            area_m2 = (unit_flow / 24.0) / max(0.5, sor)
+            unit_footprint = max(12.0, area_m2 * 1.15)
+            unit_capex = spec.base_capex_usd + area_m2 * 1450.0
+            unit_power_kw = 0.015 * (unit_flow / 24.0)
+            unit_extra = {"primary_tss_removal": round(rem_tss, 4), "surface_area_m2": round(area_m2, 1)}
+
+        elif unit_name == "Anoxic Reactor":
+            vol_anox = up["volume_anoxic_m3"]
+            ir = up["internal_recycle_fraction"]
+            hrt_h = (vol_anox / max(1.0, unit_flow)) * 24.0
+            denit_eff = min(0.86, max(0.25, (1.0 - math.exp(-0.55 * hrt_h)) * (0.55 + 0.50 * ir)))
+            state["cod_mg_L"] *= max(0.45, 1.0 - 0.20 * denit_eff)
+            state["bod5_mg_L"] *= max(0.40, 1.0 - 0.25 * denit_eff)
+            unit_power_kw = 0.008 * vol_anox + 0.004 * ir * (unit_flow / 24.0)
+            unit_capex = spec.base_capex_usd + vol_anox * 460.0
+            unit_footprint = max(15.0, vol_anox / 4.5)
+            unit_extra = {"anoxic_hrt_h": round(hrt_h, 2), "denitrification_eff": round(denit_eff, 4)}
+
+        elif unit_name == "Aerobic Reactor":
+            vol_aer = up["volume_aerobic_m3"] * 3.0  # 3 aerobic CSTR zones (R3-R5)
+            do_sp = up["do_setpoint_mg_L"]
+            temp_factor = 1.05 ** (temp_c - 20.0)
+            hrt_h = (vol_aer / max(1.0, unit_flow)) * 24.0
+            nit_eff = min(0.97, max(0.20, (1.0 - math.exp(-0.35 * hrt_h * temp_factor)) * min(1.05, 0.55 + 0.25 * do_sp)))
+            # Organic-N ammonifies and assimilates into biomass (separated in clarifier); nitrifiable N undergoes nitrification
+            org_n = max(0.0, state["tn_mg_L"] - state["nh4_mg_L"])
+            nitrifiable_n = state["nh4_mg_L"] + 0.65 * org_n
+            nh4_eff = max(0.20, state["nh4_mg_L"] * (1.0 - nit_eff))
+            oxidized_n = max(0.0, nitrifiable_n - nh4_eff) * nit_eff
+            state["nh4_mg_L"] = nh4_eff
+            cod_eff = min(0.92, 1.0 - math.exp(-0.42 * hrt_h))
+            state["cod_mg_L"] = max(25.0, state["cod_mg_L"] * (1.0 - cod_eff))
+            state["bod5_mg_L"] = max(1.8, state["bod5_mg_L"] * (1.0 - 0.94 * cod_eff))
+            if "Anoxic Reactor" in ordered[:idx]:
+                ir_val = effective_params.get("Anoxic Reactor", {}).get("internal_recycle_fraction", 0.6)
+                anox_vol = effective_params.get("Anoxic Reactor", {}).get("volume_anoxic_m3", 1000.0)
+                anox_hrt_factor = min(1.0, (anox_vol / max(1.0, unit_flow)) * 24.0 / 0.8)
+                mle_denit = min(0.84, (0.45 + 0.45 * ir_val) * max(0.4, anox_hrt_factor))
+                no3_eff = oxidized_n * (1.0 - mle_denit)
+            else:
+                no3_eff = oxidized_n * 0.90
+            state["bio_nitrate_mg_L"] = no3_eff
+            state["tn_mg_L"] = max(nh4_eff + 1.5, nh4_eff + no3_eff + 0.25 * org_n)
+            state["mlss_mg_L"] = max(1800.0, min(6800.0, 4200.0 * (1800.0 / max(400.0, up["volume_aerobic_m3"]))))
+            kla_est = max(2.0, min(22.0, (0.04 * (inlet_snapshot["cod_mg_L"] + 4.5 * inlet_snapshot["nh4_mg_L"]) * (unit_flow / max(1.0, vol_aer))) / max(0.5, 8.0 - do_sp)))
+            if kla_est > 10.0:
+                _add_violation(
+                    violations,
+                    category="integrity",
+                    code="SIM-WW-KLA",
+                    severity="hard",
+                    unit=unit_name,
+                    metric="kla_max_h_inv",
+                    actual=kla_est,
+                    limit=10.0,
+                    rel_excess=(kla_est - 10.0) / 10.0,
+                    message=f"Aerobic Reactor oxygen transfer KLa ({kla_est:.2f} h⁻¹) exceeds 10 h⁻¹ blower capacity; increase reactor volume or lower DO setpoint.",
+                )
+            if "Secondary Clarifier" not in ordered[idx + 1:]:
+                state["tss_mg_L"] = max(state["tss_mg_L"], 180.0)
+                _add_violation(
+                    violations,
+                    category="integrity",
+                    code="SIM-WW-CLARIFIER",
+                    severity="hard",
+                    unit=unit_name,
+                    metric="downstream_secondary_clarifier",
+                    actual=False,
+                    limit=True,
+                    rel_excess=1.0,
+                    message="Aerobic Reactor requires downstream Secondary Clarifier to separate activated-sludge biomass.",
+                )
+            unit_power_kw = 0.012 * unit_flow * (0.6 + 0.15 * do_sp)
+            unit_capex = spec.base_capex_usd + vol_aer * 520.0
+            unit_footprint = max(25.0, vol_aer / 4.5)
+            unit_extra = {"total_aerobic_volume_m3": round(vol_aer, 1), "kla_est_h_inv": round(kla_est, 2), "nitrification_eff": round(nit_eff, 4)}
+
+        elif unit_name in ("Activated Sludge (ASM1)", "BSM2 Full Plant"):
+            is_bsm2 = unit_name == "BSM2 Full Plant"
+            v_anox = up["volume_anoxic_m3"] * 2.0
+            v_aer = up["volume_aerobic_m3"] * 3.0
+            do_sp = up["do_setpoint_mg_L"]
+            ir = up["internal_recycle_fraction"]
+            ras = up.get("return_sludge_fraction", 0.985)
+            hrt_total_h = ((v_anox + v_aer) / max(1.0, unit_flow)) * 24.0
+            temp_factor = 1.04 ** (temp_c - 20.0)
+            nit_eff = min(0.97, max(0.35, (1.0 - math.exp(-0.30 * hrt_total_h * temp_factor)) * min(1.05, 0.55 + 0.25 * do_sp)))
+            denit_eff = min(0.88, max(0.30, (1.0 - math.exp(-0.50 * (v_anox / max(1.0, unit_flow)) * 24.0)) * (0.50 + 0.55 * ir)))
+            state["cod_mg_L"] = max(32.0, state["cod_mg_L"] * (0.14 if is_bsm2 else 0.11))
+            state["bod5_mg_L"] = max(2.2, state["bod5_mg_L"] * 0.04)
+            state["tss_mg_L"] = max(10.0, min(42.0, state["tss_mg_L"] * 0.062))
+            state["nh4_mg_L"] = max(0.35, state["nh4_mg_L"] * (1.0 - nit_eff))
+            state["tn_mg_L"] = max(state["nh4_mg_L"] + 2.0, state["tn_mg_L"] * (1.0 - 0.80 * nit_eff * denit_eff) + (1.8 if is_bsm2 else 0.0))
+            state["mlss_mg_L"] = max(2100.0, min(6800.0, 2900.0 / max(0.4, (v_anox + v_aer) / max(1.0, 0.30 * unit_flow)) * (1.0 + 18.0 * (ras - 0.96))))
+            kla_est = max(2.5, min(24.0, (0.042 * (inlet_snapshot["cod_mg_L"] + 4.5 * inlet_snapshot["nh4_mg_L"]) * (unit_flow / max(1.0, v_aer))) / max(0.5, 8.0 - do_sp)))
+            if kla_est > 10.0:
+                _add_violation(
+                    violations,
+                    category="integrity",
+                    code="SIM-WW-KLA",
+                    severity="hard",
+                    unit=unit_name,
+                    metric="kla_max_h_inv",
+                    actual=kla_est,
+                    limit=10.0,
+                    rel_excess=(kla_est - 10.0) / 10.0,
+                    message=f"{unit_name} maximum aeration KLa ({kla_est:.2f} h⁻¹) exceeds 10 h⁻¹ limit; enlarge reactor volume or reduce DO setpoint.",
+                )
+            if state["mlss_mg_L"] > 5000.0:
+                _add_violation(
+                    violations,
+                    category="integrity",
+                    code="SIM-WW-MLSS",
+                    severity="hard",
+                    unit=unit_name,
+                    metric="mlss_max_mg_L",
+                    actual=state["mlss_mg_L"],
+                    limit=5000.0,
+                    rel_excess=(state["mlss_mg_L"] - 5000.0) / 5000.0,
+                    message=f"{unit_name} MLSS ({state['mlss_mg_L']:.0f} mg/L) exceeds 5000 mg/L clarifier solids limit; enlarge bioreactors or reduce RAS fraction.",
+                )
+            state["bio_biomass_settled"] = True
+            sludge_yield = 0.09 if is_bsm2 else 0.14
+            state["sludge_kg_day"] += unit_flow * inlet_snapshot["cod_mg_L"] * sludge_yield * 1e-3
+            if is_bsm2:
+                state["biogas_m3_day"] += unit_flow * 0.058
+                state["flow_m3_day"] = unit_flow * 0.999
+            else:
+                state["flow_m3_day"] = unit_flow * 0.979
+            unit_power_kw = (0.013 if is_bsm2 else 0.011) * unit_flow * (0.65 + 0.12 * do_sp)
+            unit_capex = spec.base_capex_usd + (v_anox + v_aer) * (620.0 if is_bsm2 else 510.0)
+            unit_footprint = max(40.0, (v_anox + v_aer) / 4.2)
+            unit_extra = {
+                "total_bioreactor_volume_m3": round(v_anox + v_aer, 1),
+                "kla_max_h_inv": round(kla_est, 2),
+                "mlss_mg_L": round(state["mlss_mg_L"], 1),
+                "biogas_m3_day": round(state["biogas_m3_day"], 1),
+            }
+
+        elif unit_name == "Secondary Clarifier":
+            sor = up["surface_overflow_rate_m_h"]
+            ras = up["return_sludge_fraction"]
+            settle_eff = max(0.82, min(0.975, 0.99 - 0.025 * sor))
+            state["tss_mg_L"] = max(8.0, state["tss_mg_L"] * (1.0 - settle_eff) + 12.0 * max(0.0, ras - 0.985) * 10.0)
+            state["cod_mg_L"] = max(28.0, state["cod_mg_L"] * (0.85 if state["tss_mg_L"] < 28 else 0.95))
+            state["bod5_mg_L"] = max(2.0, state["bod5_mg_L"] * 0.72)
+            state["bio_biomass_settled"] = True
+            waste_frac = max(0.003, 1.0 - ras)
+            state["flow_m3_day"] = unit_flow * (1.0 - waste_frac)
+            state["sludge_kg_day"] += unit_flow * waste_frac * max(2500.0, state["mlss_mg_L"]) * 1e-3
+            area_m2 = (unit_flow / 24.0) / max(0.3, sor)
+            unit_capex = spec.base_capex_usd + area_m2 * 1650.0
+            unit_footprint = max(20.0, area_m2 * 1.2)
+            unit_power_kw = 0.018 * (unit_flow / 24.0)
+            unit_extra = {"ras_fraction": round(ras, 4), "clarifier_area_m2": round(area_m2, 1)}
+
+        elif unit_name == "Sludge Thickener":
+            hrt_h = up["hrt_h"]
+            unit_capex = spec.base_capex_usd + unit_flow * 18.0
+            unit_footprint = max(8.0, unit_flow * 0.003 * (hrt_h / 24.0))
+            unit_power_kw = 0.002 * (unit_flow / 24.0)
+            unit_extra = {"hrt_h": hrt_h}
+
+        elif unit_name == "Anaerobic Digester":
+            v_ad = up["volume_liquid_m3"]
+            temp_ad = up["temperature_C"]
+            dig_eff = min(0.62, 0.35 + 0.25 * (1.0 - math.exp(-v_ad / max(800.0, 0.15 * unit_flow))))
+            state["sludge_kg_day"] *= (1.0 - 0.42 * dig_eff)
+            biogas = max(50.0, unit_flow * 0.055 * (0.8 + 0.2 * (temp_ad / 35.0)))
+            state["biogas_m3_day"] += biogas
+            # Digester centrate return adds minor nitrogen load when headworks recycle is active
+            state["tn_mg_L"] += 1.4 * dig_eff
+            unit_capex = spec.base_capex_usd + v_ad * 680.0
+            unit_footprint = max(18.0, v_ad / 9.0)
+            unit_power_kw = 0.008 * v_ad
+            unit_extra = {"biogas_m3_day": round(biogas, 1), "vss_destruction": round(dig_eff, 3)}
+
+        elif unit_name == "Sludge Dewatering":
+            state["sludge_kg_day"] *= 0.92
+            unit_capex = spec.base_capex_usd + unit_flow * 22.0
+            unit_footprint = max(8.0, unit_flow * 0.002)
+            unit_power_kw = 0.004 * (unit_flow / 24.0)
+            unit_extra = {"dewatered_solids_kg_day": round(state["sludge_kg_day"], 1)}
+
         total_power_kw += unit_power_kw
         total_capex_usd += unit_capex
         total_chem_opex_usd_yr += unit_chem_usd_yr
@@ -1022,6 +1238,11 @@ def simulate_train(
             "lead_ug_L": round(state["lead_ug_L"], 3),
             "boron_mg_L": round(state["boron_mg_L"], 3),
             "silica_mg_L": round(state["silica_mg_L"], 2),
+            "cod_mg_L": round(state["cod_mg_L"], 3),
+            "bod5_mg_L": round(state["bod5_mg_L"], 3),
+            "tss_mg_L": round(state["tss_mg_L"], 3),
+            "tn_mg_L": round(state["tn_mg_L"], 3),
+            "nh4_mg_L": round(state["nh4_mg_L"], 3),
             "pH": round(state["pH"], 2),
             "disinfection_log_reduction": round(state["disinfection_log_reduction"], 3),
         },
@@ -1038,6 +1259,7 @@ def simulate_train(
             "footprint_m2": round(total_footprint_m2, 2),
             "total_chemical_dose_mg_L": round(total_chem_dose_mg_L, 2),
             "sludge_kg_day": round(state["sludge_kg_day"], 2),
+            "biogas_m3_day": round(state["biogas_m3_day"], 2),
         },
         "economics": {
             "capex_usd": round(total_capex_usd, 2),

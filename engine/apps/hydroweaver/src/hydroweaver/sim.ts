@@ -24,6 +24,7 @@ export interface SimulationSelfCheck {
   readonly python: string;
   readonly solver: { readonly name: string; readonly available: boolean; readonly detail: string };
   readonly supportedUnits: readonly string[];
+  readonly supportedFlowsheets?: readonly string[];
   readonly error?: string;
 }
 
@@ -116,6 +117,9 @@ function simulationSelfCheckPayload(result: RunResult): SimulationSelfCheck | un
   const environment = asRecord(payload['environment']);
   const solver = asRecord(payload['solver']);
   const units = Array.isArray(payload['supported_units']) ? payload['supported_units'] : [];
+  const flowsheets = Array.isArray(payload['supported_flowsheets'])
+    ? payload['supported_flowsheets'].filter((item): item is string => typeof item === 'string' && item !== '')
+    : undefined;
   return {
     available: payload['available'] === true,
     versions: asVersionRecord(environment?.['versions']),
@@ -128,6 +132,7 @@ function simulationSelfCheckPayload(result: RunResult): SimulationSelfCheck | un
     supportedUnits: units
       .map((unit) => (asRecord(unit)?.['unit'] as string | undefined) ?? '')
       .filter((unit) => unit !== ''),
+    ...(flowsheets === undefined || flowsheets.length === 0 ? {} : { supportedFlowsheets: flowsheets }),
   };
 }
 

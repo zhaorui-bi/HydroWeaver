@@ -1125,11 +1125,13 @@ describe('simulation backend', () => {
       available: true,
       environment: { versions: { watertap: '1.8.0', 'idaes-pse': '2.13.0' }, python: '3.10.22' },
       solver: { name: 'ipopt', available: true, detail: 'ok' },
-      supported_units: [{ unit: 'Pumping' }, { unit: 'Reverse Osmosis' }],
+      supported_flowsheets: ['NaCl', 'ASM1', 'BSM2'],
+      supported_units: [{ unit: 'Pumping' }, { unit: 'Reverse Osmosis' }, { unit: 'Activated Sludge (ASM1)' }, { unit: 'BSM2 Full Plant' }],
     }));
     expect(report?.available).toBe(true);
     expect(report?.versions['watertap']).toBe('1.8.0');
-    expect(report?.supportedUnits).toEqual(['Pumping', 'Reverse Osmosis']);
+    expect(report?.supportedUnits).toEqual(['Pumping', 'Reverse Osmosis', 'Activated Sludge (ASM1)', 'BSM2 Full Plant']);
+    expect(report?.supportedFlowsheets).toEqual(['NaCl', 'ASM1', 'BSM2']);
     expect(report?.solver.available).toBe(true);
     expect(parseSimulationSelfCheck('not json')).toBeUndefined();
   });
@@ -1150,9 +1152,21 @@ describe('simulation backend', () => {
     const tool = HYDROWEAVER_TOOLS.find((entry) => entry.name === 'hydroweaver_simulate_train');
     expect(tool).toBeDefined();
     expect(Object.keys(tool!.inputSchema)).toEqual(
-      expect.arrayContaining(['queryFile', 'chain', 'optimizeDesign', 'waterRecovery', 'feedSalinityGL', 'designFlowM3Day', 'output', 'wait']),
+      expect.arrayContaining([
+        'queryFile',
+        'chain',
+        'flowsheetModel',
+        'optimizeDesign',
+        'waterRecovery',
+        'feedSalinityGL',
+        'designFlowM3Day',
+        'nAnoxic',
+        'output',
+        'wait',
+      ]),
     );
     expect(tool!.description).toContain('do NOT predict trace-contaminant rejection');
+    expect(tool!.description).toContain('ASM1/BSM2');
     expect(tool!.description).toContain('unconverged');
     expect(hydroWeaverToolAnnotations('hydroweaver_simulate_train').readOnlyHint).toBe(false);
   });

@@ -408,6 +408,197 @@ UNIT_SPECS: dict[str, UnitSpec] = {
         evidence_id="HW-UNIT-BC-01",
         evidence_summary="Brine concentration recovers distillate from RO/NF reject streams to satisfy zero/minimal-liquid-discharge constraints at elevated energy and CAPEX.",
     ),
+    "Primary Clarifier": UnitSpec(
+        name="Primary Clarifier",
+        stage="primary_clarification",
+        stage_order=18,
+        aliases=("primary clarification", "primary settling"),
+        mechanisms=("gravity solids settling", "primary sludge separation"),
+        target_contaminants=("tss", "cod", "bod5"),
+        params=(
+            ParamSpec("surface_overflow_rate_m_h", "m/h", 0.8, 3.0, 1.5, "Primary clarifier surface overflow rate"),
+        ),
+        operator_complexity=2,
+        energy_tier="low",
+        base_capex_usd=42_000.0,
+        capex_per_m3d_usd=130.0,
+        base_footprint_m2=20.0,
+        footprint_per_m3d_m2=0.075,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-PCL-01",
+        evidence_summary="Primary clarification removes settleable TSS and particulate COD ahead of ASM1 bioreactors while routing primary sludge to thickening/ADM1.",
+    ),
+    "Anoxic Reactor": UnitSpec(
+        name="Anoxic Reactor",
+        stage="biological_anoxic",
+        stage_order=32,
+        aliases=("anoxic cstr", "anoxic tank", "denitrification reactor"),
+        mechanisms=("ASM1 anoxic heterotrophic denitrification", "nitrate reduction to N2"),
+        target_contaminants=("tn", "nitrate", "cod", "bod5"),
+        params=(
+            ParamSpec("volume_anoxic_m3", "m3", 250.0, 4000.0, 1000.0, "Total anoxic bioreactor volume"),
+            ParamSpec("internal_recycle_fraction", "-", 0.30, 0.80, 0.60, "Internal nitrate recycle split fraction"),
+        ),
+        operator_complexity=3,
+        energy_tier="low",
+        base_capex_usd=65_000.0,
+        capex_per_m3d_usd=145.0,
+        base_footprint_m2=25.0,
+        footprint_per_m3d_m2=0.06,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-ANOX-01",
+        evidence_summary="ASM1 anoxic CSTR zone denitrifies recycled nitrate using influent biodegradable COD.",
+    ),
+    "Aerobic Reactor": UnitSpec(
+        name="Aerobic Reactor",
+        stage="biological_aerobic",
+        stage_order=34,
+        aliases=("aeration tank", "aerobic cstr", "nitrification reactor"),
+        mechanisms=("ASM1 aerobic BOD/COD oxidation", "autotrophic nitrification"),
+        target_contaminants=("cod", "bod5", "nh4", "tn"),
+        params=(
+            ParamSpec("volume_aerobic_m3", "m3", 500.0, 5000.0, 1333.0, "Per-zone aerobic bioreactor volume"),
+            ParamSpec("do_setpoint_mg_L", "mg/L", 0.5, 4.0, 2.0, "Dissolved oxygen setpoint"),
+        ),
+        operator_complexity=3,
+        energy_tier="medium",
+        base_capex_usd=85_000.0,
+        capex_per_m3d_usd=175.0,
+        base_footprint_m2=30.0,
+        footprint_per_m3d_m2=0.075,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-AER-01",
+        evidence_summary="ASM1 aerated reactor oxidizes soluble/particulate COD and nitrifies ammonia to nitrate under controlled DO.",
+    ),
+    "Activated Sludge (ASM1)": UnitSpec(
+        name="Activated Sludge (ASM1)",
+        stage="biological_asm1",
+        stage_order=35,
+        aliases=("asm1", "activated sludge", "asm1 flowsheet", "mle"),
+        mechanisms=("ASM1 anoxic-aerobic C/N removal", "nitrification-denitrification", "recycle activated sludge"),
+        target_contaminants=("cod", "bod5", "tss", "tn", "nh4"),
+        params=(
+            ParamSpec("volume_anoxic_m3", "m3", 300.0, 3000.0, 1000.0, "Per-zone anoxic reactor volume"),
+            ParamSpec("volume_aerobic_m3", "m3", 500.0, 3500.0, 1333.0, "Per-zone aerobic reactor volume"),
+            ParamSpec("do_setpoint_mg_L", "mg/L", 0.5, 4.0, 2.0, "Aerobic DO setpoint"),
+            ParamSpec("internal_recycle_fraction", "-", 0.30, 0.80, 0.60, "Internal nitrate recycle fraction"),
+        ),
+        operator_complexity=3,
+        energy_tier="medium",
+        base_capex_usd=140_000.0,
+        capex_per_m3d_usd=260.0,
+        base_footprint_m2=45.0,
+        footprint_per_m3d_m2=0.11,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-ASM1-01",
+        evidence_summary="WaterTAP ASM1 activated-sludge flowsheet (2 anoxic CSTR + 3 aerobic CSTR_Injection + recycle).",
+    ),
+    "Secondary Clarifier": UnitSpec(
+        name="Secondary Clarifier",
+        stage="secondary_clarification",
+        stage_order=38,
+        aliases=("secondary clarification", "final clarifier"),
+        mechanisms=("biomass settling", "RAS underflow separation"),
+        target_contaminants=("tss", "cod", "bod5", "turbidity"),
+        params=(
+            ParamSpec("return_sludge_fraction", "-", 0.94, 0.995, 0.985, "Clarifier underflow RAS recycle split"),
+            ParamSpec("surface_overflow_rate_m_h", "m/h", 0.4, 2.5, 1.0, "Secondary clarifier overflow rate"),
+        ),
+        operator_complexity=2,
+        energy_tier="low",
+        base_capex_usd=55_000.0,
+        capex_per_m3d_usd=165.0,
+        base_footprint_m2=28.0,
+        footprint_per_m3d_m2=0.09,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-SCL-01",
+        evidence_summary="Secondary clarification separates activated-sludge biomass (TSS) and returns RAS to maintain reactor SRT/MLSS.",
+    ),
+    "Sludge Thickener": UnitSpec(
+        name="Sludge Thickener",
+        stage="sludge_line",
+        stage_order=76,
+        aliases=("thickener", "gravity thickener"),
+        mechanisms=("gravity sludge thickening",),
+        target_contaminants=("tss",),
+        params=(
+            ParamSpec("hrt_h", "h", 6.0, 36.0, 24.0, "Thickener hydraulic retention time"),
+        ),
+        operator_complexity=2,
+        energy_tier="low",
+        base_capex_usd=28_000.0,
+        capex_per_m3d_usd=45.0,
+        base_footprint_m2=10.0,
+        footprint_per_m3d_m2=0.015,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-THK-01",
+        evidence_summary="Concentrates waste activated and primary sludge prior to ADM1 anaerobic digestion.",
+    ),
+    "Anaerobic Digester": UnitSpec(
+        name="Anaerobic Digester",
+        stage="sludge_line",
+        stage_order=78,
+        aliases=("adm1", "anaerobic digestion", "sludge digester"),
+        mechanisms=("ADM1 anaerobic stabilization", "methane biogas generation"),
+        target_contaminants=("cod", "tss"),
+        params=(
+            ParamSpec("volume_liquid_m3", "m3", 500.0, 8000.0, 3400.0, "Digester liquid volume"),
+            ParamSpec("temperature_C", "°C", 30.0, 55.0, 35.0, "Mesophilic/thermophilic digester temperature"),
+        ),
+        operator_complexity=4,
+        energy_tier="low",
+        base_capex_usd=95_000.0,
+        capex_per_m3d_usd=110.0,
+        base_footprint_m2=22.0,
+        footprint_per_m3d_m2=0.03,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-ADM1-01",
+        evidence_summary="ADM1 anaerobic digester stabilizes biosolids and generates methane biogas, returning nitrogen-rich centrate after dewatering.",
+    ),
+    "Sludge Dewatering": UnitSpec(
+        name="Sludge Dewatering",
+        stage="sludge_line",
+        stage_order=82,
+        aliases=("dewatering", "centrifuge dewatering"),
+        mechanisms=("centrifugal biosolids dewatering",),
+        target_contaminants=("tss",),
+        params=(
+            ParamSpec("hrt_min", "min", 10.0, 60.0, 30.0, "Dewatering residence time"),
+        ),
+        operator_complexity=2,
+        energy_tier="low",
+        base_capex_usd=36_000.0,
+        capex_per_m3d_usd=55.0,
+        base_footprint_m2=8.0,
+        footprint_per_m3d_m2=0.012,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-DEW-01",
+        evidence_summary="Dewatering centrifuge reduces digested sludge cake volume for disposal while returning reject centrate.",
+    ),
+    "BSM2 Full Plant": UnitSpec(
+        name="BSM2 Full Plant",
+        stage="biological_bsm2",
+        stage_order=36,
+        aliases=("bsm2", "bsm2 plant", "wrrf", "asm1-adm1"),
+        mechanisms=("full-plant BSM2 ASM1 waterline", "ADM1 sludge digestion", "sludge-return N coupling"),
+        target_contaminants=("cod", "bod5", "tss", "tn", "nh4"),
+        params=(
+            ParamSpec("volume_anoxic_m3", "m3", 500.0, 2500.0, 1500.0, "Per-zone anoxic volume"),
+            ParamSpec("volume_aerobic_m3", "m3", 500.0, 2500.0, 1800.0, "Per-zone aerobic volume"),
+            ParamSpec("do_setpoint_mg_L", "mg/L", 0.5, 4.0, 1.8, "Aerobic DO setpoint"),
+            ParamSpec("internal_recycle_fraction", "-", 0.30, 0.75, 0.60, "Internal recycle fraction"),
+            ParamSpec("return_sludge_fraction", "-", 0.95, 0.995, 0.975, "RAS recycle fraction"),
+        ),
+        operator_complexity=4,
+        energy_tier="medium",
+        base_capex_usd=260_000.0,
+        capex_per_m3d_usd=420.0,
+        base_footprint_m2=80.0,
+        footprint_per_m3d_m2=0.18,
+        watertap_supported=True,
+        evidence_id="HW-UNIT-BSM2-01",
+        evidence_summary="WaterTAP BSM2 full-plant WRRF flowsheet coupling primary/secondary clarifiers, ASM1 bioreactors, thickening, ADM1 digestion, and dewatering.",
+    ),
 }
 
 
@@ -460,7 +651,7 @@ CONTAMINANT_SPECS: dict[str, ContaminantSpec] = {
         name="turbidity",
         field="turbidity_NTU",
         unit="NTU",
-        aliases=("tss", "suspended solids", "particles"),
+        aliases=("particles",),
         reference_limit=1.0,
         reference_note="Drinking-water filtration benchmark <= 1.0 NTU (<= 0.3 NTU preferred)",
         evidence_id="HW-CONT-TURB",
@@ -554,6 +745,51 @@ CONTAMINANT_SPECS: dict[str, ContaminantSpec] = {
         reference_limit=20.0,
         reference_note="Silica polymerization limits RO/NF recovery when brine SiO2 exceeds ~150 mg/L",
         evidence_id="HW-CONT-SI",
+    ),
+    "cod": ContaminantSpec(
+        name="cod",
+        field="cod_mg_L",
+        unit="mg/L",
+        aliases=("chemical oxygen demand",),
+        reference_limit=100.0,
+        reference_note="BSM2/ASM1 wastewater effluent COD discharge benchmark <= 100 mg/L",
+        evidence_id="HW-CONT-COD",
+    ),
+    "bod5": ContaminantSpec(
+        name="bod5",
+        field="bod5_mg_L",
+        unit="mg/L",
+        aliases=("bod", "biochemical oxygen demand"),
+        reference_limit=10.0,
+        reference_note="BSM2/ASM1 wastewater effluent BOD5 benchmark <= 10 mg/L",
+        evidence_id="HW-CONT-BOD5",
+    ),
+    "tss": ContaminantSpec(
+        name="tss",
+        field="tss_mg_L",
+        unit="mg/L",
+        aliases=("total suspended solids", "suspended solids"),
+        reference_limit=30.0,
+        reference_note="BSM2/ASM1 wastewater effluent TSS benchmark <= 30 mg/L",
+        evidence_id="HW-CONT-TSS",
+    ),
+    "tn": ContaminantSpec(
+        name="tn",
+        field="tn_mg_L",
+        unit="mg/L",
+        aliases=("total nitrogen", "tn_mg_n_l"),
+        reference_limit=18.0,
+        reference_note="BSM2/ASM1 wastewater effluent Total Nitrogen benchmark <= 18 mg N/L",
+        evidence_id="HW-CONT-TN",
+    ),
+    "nh4": ContaminantSpec(
+        name="nh4",
+        field="nh4_mg_L",
+        unit="mg/L",
+        aliases=("ammonia", "ammonium", "nh4-n", "nh3-n"),
+        reference_limit=4.0,
+        reference_note="BSM2/ASM1 wastewater effluent ammonia benchmark <= 4 mg N/L",
+        evidence_id="HW-CONT-NH4",
     ),
 }
 
@@ -680,8 +916,25 @@ TEMPLATE_PRIORS: tuple[TemplatePrior, ...] = (
         rationale="Combines membrane/carbon pretreatment with UV/H2O2 AOP for recalcitrant TOC and pathogen control.",
         notes="Requires low turbidity upstream for UV transmittance.",
     ),
+    TemplatePrior(
+        template_id="TPL-WW-ASM1-MLE",
+        title="ASM1 Pre-Denitrification & Nitrification Activated Sludge",
+        source_waters=("wastewater", "municipal wastewater", "sewage"),
+        target_contaminants=("cod", "bod5", "tss", "tn", "nh4"),
+        chain=("Anoxic Reactor", "Aerobic Reactor", "Secondary Clarifier"),
+        rationale="WaterTAP ASM1 anoxic-aerobic activated sludge train removes COD/BOD5, nitrifies ammonia, and denitrifies via internal recycle.",
+        notes="Pair with Primary Clarifier and Anaerobic Digester (BSM2) when sludge stabilization is required.",
+    ),
+    TemplatePrior(
+        template_id="TPL-WW-BSM2-WRRF",
+        title="BSM2 Full-Plant Activated Sludge (ASM1) + Anaerobic Digestion (ADM1)",
+        source_waters=("wastewater", "municipal wastewater", "sewage"),
+        target_contaminants=("cod", "bod5", "tss", "tn", "nh4"),
+        chain=("Primary Clarifier", "Anoxic Reactor", "Aerobic Reactor", "Secondary Clarifier", "Sludge Thickener", "Anaerobic Digester", "Sludge Dewatering"),
+        rationale="WaterTAP BSM2 couples primary clarification, ASM1 biological N/COD removal, and ADM1 biosolids digestion with biogas recovery.",
+        notes="Accounts for nitrogen-rich digester centrate return to the headworks.",
+    ),
 )
-
 
 MEASUREMENT_UNITS: dict[str, str | None] = {
     "pH": None,
@@ -699,6 +952,11 @@ MEASUREMENT_UNITS: dict[str, str | None] = {
     "lead_ug_L": "µg/L",
     "boron_mg_L": "mg/L",
     "silica_mg_L": "mg/L",
+    "cod_mg_L": "mg/L",
+    "bod5_mg_L": "mg/L",
+    "tss_mg_L": "mg/L",
+    "tn_mg_L": "mg/L",
+    "nh4_mg_L": "mg/L",
 }
 
 _TARGET_FIELDS: dict[str, str] = {
@@ -714,6 +972,11 @@ _TARGET_FIELDS: dict[str, str] = {
     "lead": "extra.lead_ug_L",
     "boron": "extra.boron_mg_L",
     "silica": "extra.silica_mg_L",
+    "cod": "extra.cod_mg_L",
+    "bod5": "extra.bod5_mg_L",
+    "tss": "extra.tss_mg_L",
+    "tn": "extra.tn_mg_L",
+    "nh4": "extra.nh4_mg_L",
 }
 
 _PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2}
@@ -750,9 +1013,9 @@ def _extract_raw_query_hints(raw_query: str) -> dict[str, Any]:
     """Deterministic parser for natural-language queries without requiring remote LLMs."""
     text = raw_query.lower()
     source_water = "unknown"
-    for candidate in ("seawater", "groundwater", "surface water", "wastewater", "brackish", "industrial"):
+    for candidate in ("seawater", "groundwater", "surface water", "municipal wastewater", "wastewater", "sewage", "brackish", "industrial"):
         if candidate in text:
-            source_water = candidate
+            source_water = "wastewater" if candidate in ("municipal wastewater", "sewage") else candidate
             break
     contaminants: list[str] = []
     for cname, spec in CONTAMINANT_SPECS.items():
@@ -776,6 +1039,11 @@ def _extract_raw_query_hints(raw_query: str) -> dict[str, Any]:
         ("toc_mg_L", r"(?:toc|nom)[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
         ("nitrate_mg_L", r"nitrate[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
         ("hardness_mg_L", r"hardness[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
+        ("cod_mg_L", r"cod[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
+        ("bod5_mg_L", r"bod5?[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
+        ("tss_mg_L", r"tss[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
+        ("tn_mg_L", r"(?:total nitrogen|tn)[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
+        ("nh4_mg_L", r"(?:ammonia|nh4(?:-n)?)[^\d]{0,20}(\d+(?:\.\d+)?)\s*mg/l", 1.0),
     ):
         match = re.search(pattern, text)
         if match and label not in wq:
@@ -1111,7 +1379,7 @@ def build_case_assessment(normalized: dict[str, Any]) -> dict[str, Any]:
 
     for cname in contaminants:
         cspec = CONTAMINANT_SPECS.get(cname)
-        if cspec is not None and not _has_value(wq.get(cspec.field)):
+        if cspec is not None and not _has_value(wq.get(cspec.field)) and not _has_value(water_extra.get(cspec.field)):
             _add_info_action(
                 actions,
                 seen,
@@ -1123,11 +1391,15 @@ def build_case_assessment(normalized: dict[str, Any]) -> dict[str, Any]:
                 decision_impact="Influent concentration determines required log/mass removal and dosing.",
             )
         tfield = _TARGET_FIELDS.get(cname)
-        tval = (
-            target_extra.get(tfield.removeprefix("extra."))
-            if tfield is not None and tfield.startswith("extra.")
-            else targets.get(tfield)
-        )
+        base_tfield = tfield.removeprefix("extra.") if tfield is not None else None
+        tval = None
+        if base_tfield is not None:
+            tval = targets.get(base_tfield)
+            if not _has_value(tval):
+                tval = target_extra.get(base_tfield)
+            if not _has_value(tval) and base_tfield in ("tn_mg_L", "nh4_mg_L"):
+                alt = "tn_mg_N_L" if base_tfield == "tn_mg_L" else "nh4_mg_N_L"
+                tval = target_extra.get(alt)
         if tfield is not None and not _has_value(tval):
             _add_info_action(
                 actions,
@@ -1427,6 +1699,17 @@ def default_parameters_for_chain(chain: list[str], case: dict[str, Any] | None =
             pi_bar = 0.00078 * tds
             unit_params["feed_pressure_bar"] = min(82.0, max(8.0, round(pi_bar * 2.4 + 7.5, 2)))
             unit_params["recovery"] = 0.48 if tds > 15000 else 0.72 if tds < 5000 else 0.60
+        elif unit in ("Anoxic Reactor", "Aerobic Reactor", "Activated Sludge (ASM1)", "BSM2 Full Plant"):
+            constraints_map = (case or {}).get("constraints") if isinstance((case or {}).get("constraints"), dict) else {}
+            c_extra = constraints_map.get("extra") if isinstance(constraints_map.get("extra"), dict) else {}
+            raw_flow = c_extra.get("design_flow_m3_day")
+            flow_m3_d = float(raw_flow) if isinstance(raw_flow, (int, float)) and not isinstance(raw_flow, bool) and float(raw_flow) > 0 else 500.0
+            if "volume_anoxic_m3" in unit_params:
+                spec_v = next(p for p in spec.params if p.name == "volume_anoxic_m3")
+                unit_params["volume_anoxic_m3"] = max(spec_v.lower, min(spec_v.upper, round(flow_m3_d * (1000.0 / 20648.0), 1)))
+            if "volume_aerobic_m3" in unit_params:
+                spec_v = next(p for p in spec.params if p.name == "volume_aerobic_m3")
+                unit_params["volume_aerobic_m3"] = max(spec_v.lower, min(spec_v.upper, round(flow_m3_d * (1333.0 / 20648.0), 1)))
         params[unit] = unit_params
     return params
 

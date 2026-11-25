@@ -15,7 +15,7 @@ SIM_ROOT = PACKAGE_ROOT / "sim"
 sys.path.insert(0, str(SIM_ROOT))
 
 import runner  # noqa: E402
-from unit_map import classify, normalize_unit  # noqa: E402
+from unit_map import classify, normalize_unit, select_flowsheet_family  # noqa: E402
 
 CASE = {
     "source_water": "groundwater",
@@ -31,6 +31,11 @@ class UnitMapTests(unittest.TestCase):
         self.assertEqual(normalize_unit(" reverse_osmosis "), "Reverse Osmosis")
         self.assertEqual(normalize_unit("Membrane Separation"), "Reverse Osmosis")
         self.assertEqual(normalize_unit("nf"), "Nanofiltration")
+        self.assertEqual(normalize_unit("asm1"), "Activated Sludge (ASM1)")
+        self.assertEqual(normalize_unit("bsm2"), "BSM2 Full Plant")
+        self.assertEqual(normalize_unit("anoxic cstr"), "Anoxic Reactor")
+        self.assertEqual(normalize_unit("aeration tank"), "Aerobic Reactor")
+        self.assertEqual(normalize_unit("adm1"), "Anaerobic Digester")
         self.assertIsNone(normalize_unit("Adsorption"))
         self.assertIsNone(normalize_unit("Chlorination"))
         self.assertIsNone(normalize_unit(""))
@@ -41,6 +46,13 @@ class UnitMapTests(unittest.TestCase):
         self.assertEqual(coverage["unsupported"], ["Adsorption", "Chlorination"])
         self.assertEqual(len(coverage["specs"]), 2)
         self.assertEqual(coverage["specs"][1].model, "watertap.unit_models.reverse_osmosis_0D.ReverseOsmosis0D")
+        self.assertEqual(select_flowsheet_family(coverage["specs"]), "nacl")
+
+        asm1_cov = classify(["Anoxic Reactor", "Aerobic Reactor", "Secondary Clarifier"])
+        self.assertEqual(select_flowsheet_family(asm1_cov["specs"]), "asm1")
+        bsm2_cov = classify(["Primary Clarifier", "Anoxic Reactor", "Aerobic Reactor", "Anaerobic Digester"])
+        self.assertEqual(select_flowsheet_family(bsm2_cov["specs"]), "bsm2")
+        self.assertEqual(select_flowsheet_family(coverage["specs"], {"flowsheet_model": "bsm2"}), "bsm2")
 
 
 class SelfCheckTests(unittest.TestCase):
@@ -50,9 +62,26 @@ class SelfCheckTests(unittest.TestCase):
         self.assertEqual(report["schema_version"], 1)
         self.assertIn(report["available"], (True, False))
         self.assertIn("watertap", report["environment"]["versions"])
+        self.assertIn("asm1_importable", report["environment"])
+        self.assertIn("bsm2_importable", report["environment"])
         self.assertIn("solver", report)
+        self.assertEqual(report["supported_flowsheets"], ["NaCl", "ASM1", "BSM2"])
         names = [unit["unit"] for unit in report["supported_units"]]
-        self.assertEqual(names, ["Nanofiltration", "Pumping", "Reverse Osmosis"])
+        for expected in (
+            "Activated Sludge (ASM1)",
+            "Aerobic Reactor",
+            "Anaerobic Digester",
+            "Anoxic Reactor",
+            "BSM2 Full Plant",
+            "Nanofiltration",
+            "Primary Clarifier",
+            "Pumping",
+            "Reverse Osmosis",
+            "Secondary Clarifier",
+            "Sludge Dewatering",
+            "Sludge Thickener",
+        ):
+            self.assertIn(expected, names)
         self.assertTrue(report["limitations"])
         self.assertIn("Chlorination", report["unsupported_examples"])
 
@@ -80,13 +109,19 @@ class SimulateContractTests(unittest.TestCase):
     def test_reports_error_when_backend_is_missing(self) -> None:
         if runner.environment_report()["available"]:
             self.skipTest("a real simulation backend is installed in this interpreter")
-        record = runner.simulate({
-            "schema_version": 1,
-            "case": CASE,
-            "train": {"chain_id": "chain-1", "chain": ["Pumping", "Reverse Osmosis"]},
-        })
-        self.assertEqual(record["status"], "error")
-        self.assertIn("not installed", record["error"])
+        for chain, flowsheet in (
+            (["Pumping", "Reverse Osmosis"], "NaCl"),
+            (["Activated Sludge (ASM1)"], "ASM1"),
+            (["BSM2 Full Plant"], "BSM2"),
+        ):
+            record = runner.simulate({
+                "schema_version": 1,
+                "case": CASE,
+                "train": {"chain_id": "chain-1", "chain": chain},
+            })
+            self.assertEqual(record["flowsheet_model"], flowsheet)
+            self.assertEqual(record["status"], "error")
+            self.assertIn("not installed", record["error"])
 
     def test_declared_basis_is_reported_and_never_invented(self) -> None:
         salinity, source = runner.feed_salinity_g_l({"case": {"water_quality": {"tds_mg_L": 2500}}, "options": {}})

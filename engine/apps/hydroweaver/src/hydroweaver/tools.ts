@@ -175,6 +175,11 @@ const waterQualitySchema = z
     lead_ug_L: finiteMeasurement.nonnegative().optional(),
     boron_mg_L: finiteMeasurement.nonnegative().optional(),
     silica_mg_L: finiteMeasurement.nonnegative().optional(),
+    cod_mg_L: finiteMeasurement.nonnegative().optional(),
+    bod5_mg_L: finiteMeasurement.nonnegative().optional(),
+    tss_mg_L: finiteMeasurement.nonnegative().optional(),
+    tn_mg_L: finiteMeasurement.nonnegative().optional(),
+    nh4_mg_L: finiteMeasurement.nonnegative().optional(),
     extra: extraRecord.describe('Additional source-water measurements and reporting metadata (e.g., nitrate_basis, hardness_basis, arsenic_speciation).'),
   })
   .strict();
@@ -190,6 +195,11 @@ const treatmentTargetsSchema = z
     hardness_mg_L: finiteMeasurement.nonnegative().optional(),
     iron_mg_L: finiteMeasurement.nonnegative().optional(),
     boron_mg_L: finiteMeasurement.nonnegative().optional(),
+    cod_mg_L: finiteMeasurement.nonnegative().optional(),
+    bod5_mg_L: finiteMeasurement.nonnegative().optional(),
+    tss_mg_L: finiteMeasurement.nonnegative().optional(),
+    tn_mg_L: finiteMeasurement.nonnegative().optional(),
+    nh4_mg_L: finiteMeasurement.nonnegative().optional(),
     e_coli: z.string().trim().max(256).optional(),
     compliance_standard: z.string().trim().max(256).optional(),
     extra: extraRecord.describe('Additional effluent targets and reporting metadata (e.g., lead_ug_L, nitrate_basis).'),
@@ -679,15 +689,24 @@ export const HYDROWEAVER_TOOLS: readonly HydroWeaverTool[] = [
     name: 'hydroweaver_simulate_train',
     title: 'Simulate or NLP-optimize a flowsheet with WaterTAP',
     description:
-      'Build the declared treatment train as a WaterTAP/IDAES flowsheet with WaterTAPCosting and solve (or NLP-optimize LCOW when optimizeDesign=true) with IPOPT. Scientific scope: the NaCl property package models water and sodium chloride salinity, so WaterTAP results describe salinity-driven hydraulics, energy, and CAPEX/OPEX/LCOW — they do NOT predict trace-contaminant rejection, and units without a WaterTAP model are reported as unsupported. An unconverged solver status means unconverged, not infeasible. Requires HYDROWEAVER_SIM_PYTHON; see docs/SIMULATION.md.',
+      'Build the declared treatment train as a WaterTAP/IDAES flowsheet (NaCl membrane desalination, ASM1 activated-sludge biological treatment, or BSM2 ASM1+ADM1 full wastewater plant) with WaterTAPCosting and solve (or NLP-optimize when optimizeDesign=true) with IPOPT. Scientific scope: the NaCl property package models water and sodium chloride salinity, so NaCl runs do NOT predict trace-contaminant rejection; ASM1/BSM2 runs model steady-state biological carbon/nitrogen removal (and ADM1 digestion in BSM2) without site calibration; units without a WaterTAP model are reported as unsupported. An unconverged solver status means unconverged, not infeasible. Requires HYDROWEAVER_SIM_PYTHON; see docs/SIMULATION.md.',
     inputSchema: {
       queryFile: nonEmptyPath.describe(`JSON file containing the HydroWeaver UserQuery case. ${PATH_NOTE}`),
-      chain: z.array(shortText).min(1).max(64).describe('Ordered treatment-unit names of the candidate train, for example ["Pumping", "Reverse Osmosis"].'),
+      chain: z.array(shortText).min(1).max(64).describe('Ordered treatment-unit names of the candidate train, for example ["Pumping", "Reverse Osmosis"], ["Activated Sludge (ASM1)"], or ["BSM2 Full Plant"].'),
       chainId: z.string().trim().min(1).max(256).optional().describe('Identifier recorded with the train.'),
-      optimizeDesign: z.boolean().optional().describe('When true, unfixes pump pressure, membrane area, and recovery within bounds and solves a Pyomo+IPOPT NLP minimizing LCOW.'),
-      waterRecovery: z.number().min(0.05).max(0.95).optional().describe('Declared water-recovery target for the last membrane; default 0.5.'),
-      feedSalinityGL: z.number().nonnegative().optional().describe('Feed salinity in g/L NaCl-equivalent; declared case TDS is used when absent.'),
-      designFlowM3Day: z.number().positive().optional().describe('Design feed flow in m3/day; the declared case value or a nominal 100 m3/day basis is used when absent.'),
+      flowsheetModel: z.enum(['auto', 'nacl', 'asm1', 'bsm2']).optional().describe('WaterTAP flowsheet model family (auto-inferred from chain units by default).'),
+      optimizeDesign: z.boolean().optional().describe('When true, unfixes decision variables (pump pressure/membrane area/recovery for NaCl, or bioreactor volumes/KLa/DO/recycles for ASM1/BSM2) and solves a Pyomo+IPOPT NLP.'),
+      waterRecovery: z.number().min(0.05).max(0.95).optional().describe('Declared water-recovery target for NaCl membranes; default 0.5.'),
+      feedSalinityGL: z.number().nonnegative().optional().describe('Feed salinity in g/L NaCl-equivalent for NaCl flowsheets; declared case TDS is used when absent.'),
+      designFlowM3Day: z.number().positive().optional().describe('Design feed flow in m3/day; the declared case value or WaterTAP reference flow is used when absent.'),
+      temperatureC: z.number().min(0).max(80).optional().describe('Influent wastewater temperature in °C for ASM1/BSM2 flowsheets.'),
+      nAnoxic: z.number().int().min(1).max(3).optional().describe('Number of anoxic bioreactor zones (1, 2, or 3) for BSM2; total zones = 5.'),
+      anoxicVolumeM3: z.number().positive().optional().describe('Per-zone anoxic reactor volume in m3 for ASM1/BSM2.'),
+      aerobicVolumeM3: z.number().positive().optional().describe('Per-zone aerobic reactor volume in m3 for ASM1/BSM2.'),
+      doSetpointsMgL: z.array(z.number().positive().max(12)).min(1).max(4).optional().describe('Aerobic reactor DO setpoints in mg/L for ASM1/BSM2.'),
+      internalRecycleFraction: z.number().min(0.05).max(0.95).optional().describe('Internal nitrate recycle split fraction (SP5) for ASM1/BSM2.'),
+      returnSludgeFraction: z.number().min(0.5).max(0.999).optional().describe('Return activated sludge fraction (SP6) for ASM1/BSM2.'),
+      asm1Influent: z.record(z.string(), z.number().nonnegative()).optional().describe('Optional ASM1 influent component map (S_I, S_S, X_I, X_S, X_BH, X_BA, X_P, S_O, S_NO, S_NH, S_ND, X_ND) in mg/L.'),
       output: nonEmptyPath.optional().describe('Simulation result JSON path.'),
       ...waitShape,
     },
@@ -713,10 +732,26 @@ export const HYDROWEAVER_TOOLS: readonly HydroWeaverTool[] = [
       if (chain.length === 0) return fail('chain must contain at least one non-empty unit name.');
       const inputPath = path.join(workDir, 'hydroweaver-output', `simulate-input_${timestampStamp()}_${randomBytes(6).toString('hex')}.json`);
       const output = outputPath(args, workDir, 'simulation');
-      const options: Record<string, unknown> = { property_package: 'NaCl', solver: 'ipopt' };
+      const requestedModel = typeof args['flowsheetModel'] === 'string' ? args['flowsheetModel'] : 'auto';
+      const inferredPropertyPackage =
+        requestedModel === 'asm1'
+          ? 'ASM1'
+          : requestedModel === 'bsm2'
+            ? 'ASM1_ADM1'
+            : 'NaCl';
+      const options: Record<string, unknown> = { property_package: inferredPropertyPackage, solver: 'ipopt' };
+      if (requestedModel !== 'auto') options['flowsheet_model'] = requestedModel;
       if (typeof args['waterRecovery'] === 'number') options['water_recovery'] = args['waterRecovery'];
       if (typeof args['feedSalinityGL'] === 'number') options['feed_salinity_g_L'] = args['feedSalinityGL'];
       if (typeof args['designFlowM3Day'] === 'number') options['design_flow_m3_day'] = args['designFlowM3Day'];
+      if (typeof args['temperatureC'] === 'number') options['temperature_C'] = args['temperatureC'];
+      if (typeof args['nAnoxic'] === 'number') options['n_anoxic'] = args['nAnoxic'];
+      if (typeof args['anoxicVolumeM3'] === 'number') options['anoxic_volume_m3'] = args['anoxicVolumeM3'];
+      if (typeof args['aerobicVolumeM3'] === 'number') options['aerobic_volume_m3'] = args['aerobicVolumeM3'];
+      if (Array.isArray(args['doSetpointsMgL'])) options['do_setpoints_mg_L'] = args['doSetpointsMgL'];
+      if (typeof args['internalRecycleFraction'] === 'number') options['internal_recycle_fraction'] = args['internalRecycleFraction'];
+      if (typeof args['returnSludgeFraction'] === 'number') options['return_sludge_fraction'] = args['returnSludgeFraction'];
+      if (isRecord(args['asm1Influent'])) options['asm1_mg_L'] = args['asm1Influent'];
       const payload = {
         schema_version: 1,
         case: caseData,

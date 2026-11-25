@@ -128,12 +128,34 @@ class StandaloneEngineTests(unittest.TestCase):
         examples = PACKAGE_ROOT.parents[2] / "examples" / "cases"
         for name, expected_status in (
             ("arsenic-groundwater", "ready_for_screening"),
+            ("municipal-bsm2", "ready_for_screening"),
             ("nitrate-basis-unknown", "needs_information"),
             ("lead-source-unknown", "blocked"),
         ):
             case = json.loads((examples / f"{name}.json").read_text(encoding="utf-8"))
             payload = self._assess(case)
             self.assertEqual(payload["decision_readiness"]["status"], expected_status)
+
+    def test_municipal_asm1_bsm2_closed_loop_optimization(self) -> None:
+        examples = PACKAGE_ROOT.parents[2] / "examples" / "cases"
+        case = json.loads((examples / "municipal-bsm2.json").read_text(encoding="utf-8"))
+        result = self._run(
+            "optimize",
+            "--query-json",
+            json.dumps(case),
+            "--candidates-json",
+            json.dumps([["Aerobic Reactor"]]),
+            "--max-rounds",
+            "6",
+            "--max-sim-calls",
+            "40",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["optimization"]["status"], "feasible")
+        best = payload["best_design"]
+        self.assertTrue(best["feasible"])
+        self.assertIn("Secondary Clarifier", best["chain"])
 
     def test_closed_loop_optimization_revises_structure_and_optimizes_parameters(self) -> None:
         # Caller supplies an intentionally flawed initial chain: RO without pumping + violates no-brine constraint!

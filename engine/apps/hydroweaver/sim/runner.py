@@ -25,13 +25,21 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from unit_map import SUPPORTED_UNITS, UNSUPPORTED_EXAMPLES, classify  # noqa: E402
+from unit_map import (  # noqa: E402
+    SUPPORTED_FLOWSHEETS,
+    SUPPORTED_UNITS,
+    UNSUPPORTED_EXAMPLES,
+    classify,
+    select_flowsheet_family,
+)
+from wastewater import WastewaterFlowsheetError, simulate_asm1, simulate_bsm2  # noqa: E402
 
 SCHEMA_VERSION = 1
 PACKAGES = ('watertap', 'idaes-pse', 'pyomo', 'cyipopt')
 LIMITATIONS = [
-    'The MVP property package models water and sodium chloride salinity; it does not contain trace contaminants, so it cannot predict contaminant rejection or target attainment.',
-    'A simulation result reports hydraulic and energy behavior under the declared conditions; it is not process sizing, costing, or a performance guarantee.',
+    'The NaCl property package models water and sodium chloride salinity; it does not contain trace contaminants, so it cannot predict trace-contaminant rejection.',
+    'The ASM1 and BSM2 flowsheets model biological carbon/nitrogen removal (and ADM1 anaerobic digestion in BSM2) under steady-state reference assumptions and are uncalibrated unless site-fitted.',
+    'A simulation result reports hydraulic, biological, and energy behavior under the declared conditions; it is not process sizing, costing, or a regulatory guarantee.',
     'Units without a mechanistic model are excluded from the flowsheet and reported as unsupported; they are never silently replaced.',
     'An unconverged solver status means the result is unconverged, not that the train is infeasible.',
 ]
@@ -84,13 +92,15 @@ def environment_report() -> dict[str, Any]:
         'versions': versions,
         'python': sys.version.split()[0],
         'watertap_importable': importable('watertap'),
+        'asm1_importable': importable('watertap.flowsheets.activated_sludge.ASM1_flowsheet'),
+        'bsm2_importable': importable('watertap.flowsheets.full_water_resource_recovery_facility.BSM2'),
         'available': watertap_ok and versions['idaes-pse'] is not None and versions['pyomo'] is not None,
     }
 
 
 def supported_units() -> list[dict[str, Any]]:
     return [
-        {'unit': canonical, 'model': spec.model, 'kind': spec.kind}
+        {'unit': canonical, 'model': spec.model, 'kind': spec.kind, 'family': spec.family}
         for canonical, spec in sorted(SUPPORTED_UNITS.items())
     ]
 
@@ -103,6 +113,7 @@ def self_check() -> dict[str, Any]:
         'available': environment['available'],
         'environment': environment,
         'solver': solver_available('ipopt'),
+        'supported_flowsheets': list(SUPPORTED_FLOWSHEETS),
         'supported_units': supported_units(),
         'unsupported_examples': list(UNSUPPORTED_EXAMPLES),
         'limitations': LIMITATIONS,
@@ -665,11 +676,14 @@ def simulate(payload: dict[str, Any], *, optimize_design: bool = False) -> dict[
     if not isinstance(chain, list) or not chain or not all(isinstance(unit, str) and unit.strip() for unit in chain):
         raise ValueError('train.chain must be a non-empty string array')
 
+    options = payload.get('options') if isinstance(payload.get('options'), dict) else {}
     coverage = classify(chain)
+    family = select_flowsheet_family(coverage['specs'], options)
     environment = environment_report()
     record: dict[str, Any] = {
         'kind': 'hydroweaver.simulation-result',
         'schema_version': SCHEMA_VERSION,
+        'flowsheet_model': family.upper() if family in ('asm1', 'bsm2') else 'NaCl',
         'coverage': {
             'modeled': coverage['modeled'],
             'unsupported': coverage['unsupported'],
@@ -680,7 +694,8 @@ def simulate(payload: dict[str, Any], *, optimize_design: bool = False) -> dict[
         'limitations': LIMITATIONS,
     }
 
-    if not coverage['modeled']:
+    explicit_wastewater = str(options.get('flowsheet_model') or '').strip().lower() in {'asm1', 'bsm2'}
+    if not coverage['modeled'] and not explicit_wastewater:
         record['status'] = 'unsupported'
         record['solver'] = {'name': 'ipopt', 'status': 'not_run', 'termination_condition': '', 'iterations': 0, 'message': 'no unit in the train maps to a WaterTAP unit model'}
         return record
@@ -691,8 +706,13 @@ def simulate(payload: dict[str, Any], *, optimize_design: bool = False) -> dict[
         return record
 
     try:
-        outcome = build_and_solve(coverage['modeled'], coverage['specs'], payload, optimize_design=optimize_design)
-    except FlowsheetError as error:
+        if family == 'asm1':
+            outcome = simulate_asm1(coverage['modeled'], coverage['specs'], payload, optimize_design=optimize_design)
+        elif family == 'bsm2':
+            outcome = simulate_bsm2(coverage['modeled'], coverage['specs'], payload, optimize_design=optimize_design)
+        else:
+            outcome = build_and_solve(coverage['modeled'], coverage['specs'], payload, optimize_design=optimize_design)
+    except (FlowsheetError, WastewaterFlowsheetError) as error:
         record['status'] = 'error'
         record['error'] = str(error)
         return record

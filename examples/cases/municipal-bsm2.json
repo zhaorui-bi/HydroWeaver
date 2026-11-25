@@ -1,0 +1,52 @@
+{
+  "query_id": "municipal-bsm2-wrrf",
+  "source_water": "wastewater",
+  "water_quality": {
+    "pH": 7.2,
+    "temperature_C": 35.0,
+    "cod_mg_L": 590.0,
+    "bod5_mg_L": 116.75,
+    "tss_mg_L": 378.75,
+    "tn_mg_L": 53.52,
+    "nh4_mg_L": 23.0,
+    "extra": {
+      "alkalinity_mol_m3": 7.0,
+      "asm1_mg_L": {
+        "S_I": 27.0,
+        "S_S": 58.0,
+        "X_I": 92.0,
+        "X_S": 363.0,
+        "X_BH": 50.0,
+        "X_BA": 0.000001,
+        "X_P": 0.000001,
+        "S_O": 0.000001,
+        "S_NO": 0.000001,
+        "S_NH": 23.0,
+        "S_ND": 5.0,
+        "X_ND": 16.0
+      }
+    }
+  },
+  "contaminants": ["cod", "bod5", "tss", "tn", "nh4"],
+  "treatment_targets": {
+    "cod_mg_L": 100.0,
+    "bod5_mg_L": 10.0,
+    "tss_mg_L": 30.0,
+    "tn_mg_L": 18.0,
+    "nh4_mg_L": 4.0
+  },
+  "constraints": {
+    "budget": "medium",
+    "energy": "low",
+    "brine_disposal": false,
+    "operator_skill": "high",
+    "use_for_drinking": false,
+    "chemical_dosing_allowed": false,
+    "extra": {
+      "design_flow_m3_day": 20648.0,
+      "max_sec_kwh_m3": 1.0,
+      "max_lcow_usd_m3": 0.8
+    }
+  },
+  "context": "Municipal wastewater resource recovery facility evaluated with ASM1 and BSM2 (ASM1 + ADM1)."
+}

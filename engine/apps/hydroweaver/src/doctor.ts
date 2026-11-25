@@ -254,10 +254,14 @@ async function simulationCheck(homeDir: string): Promise<DoctorCheck> {
   const versions = Object.entries(report.versions)
     .map(([name, version]) => `${name} ${version ?? 'missing'}`)
     .join(', ');
+  const flows =
+    report.supportedFlowsheets !== undefined && report.supportedFlowsheets.length > 0
+      ? `; flowsheets: ${report.supportedFlowsheets.join(', ')}`
+      : '';
   return {
     name: 'simulation_backend',
     ok: report.solver.available,
-    detail: `${describeSimulationBackend(backend)} — ${versions}; ipopt ${report.solver.available ? 'available' : 'MISSING'}`,
+    detail: `${describeSimulationBackend(backend)} — ${versions}; ipopt ${report.solver.available ? 'available' : 'MISSING'}${flows}`,
     required: false,
   };
 }

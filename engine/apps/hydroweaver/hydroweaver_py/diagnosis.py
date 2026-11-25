@@ -292,6 +292,39 @@ def diagnose_simulation(
                 if "UV Disinfection" not in chain:
                     propose_edit("add", "UV Disinfection", reason="Add UV Disinfection to boost cumulative pathogen log reduction.", priority=86)
 
+        elif code == "SIM-WW-CLARIFIER":
+            structural_causes.append(v)
+            if "Secondary Clarifier" not in chain:
+                propose_edit("add", "Secondary Clarifier", reason="Add Secondary Clarifier downstream of Aerobic Reactor for biomass settling.", priority=97)
+
+        elif code in ("SIM-WW-KLA", "SIM-WW-MLSS"):
+            if not params_already_optimized:
+                parametric_causes.append(v)
+            else:
+                structural_causes.append(v)
+                if "Primary Clarifier" not in chain and "Activated Sludge (ASM1)" not in chain and "BSM2 Full Plant" not in chain:
+                    propose_edit("add", "Primary Clarifier", reason="Add Primary Clarifier to reduce biological solids/COD loading.", priority=86)
+
+        elif code in ("WQ-COD_MG_L", "WQ-BOD5_MG_L", "WQ-TSS_MG_L", "WQ-TN_MG_L", "WQ-NH4_MG_L"):
+            has_bio = any(u in chain for u in ("Anoxic Reactor", "Aerobic Reactor", "Activated Sludge (ASM1)", "BSM2 Full Plant"))
+            if not has_bio:
+                structural_causes.append(v)
+                if code in ("WQ-TN_MG_L", "WQ-NH4_MG_L"):
+                    propose_edit("add", "Anoxic Reactor", reason="Add Anoxic Reactor (ASM1 denitrification) for TN control.", priority=94)
+                    propose_edit("add", "Aerobic Reactor", reason="Add Aerobic Reactor (ASM1 nitrification/COD removal).", priority=93)
+                    propose_edit("add", "Secondary Clarifier", reason="Pair biological reactors with Secondary Clarifier.", priority=92)
+                else:
+                    propose_edit("add", "Activated Sludge (ASM1)", reason="Add ASM1 activated sludge system for biological COD/BOD/N removal.", priority=92)
+            elif code == "WQ-TN_MG_L" and "Anoxic Reactor" not in chain and "Activated Sludge (ASM1)" not in chain and "BSM2 Full Plant" not in chain:
+                structural_causes.append(v)
+                propose_edit("add", "Anoxic Reactor", reason="Add Anoxic Reactor upstream of Aerobic Reactor for nitrogen removal.", priority=94)
+            elif not params_already_optimized:
+                parametric_causes.append(v)
+            else:
+                structural_causes.append(v)
+                if "Primary Clarifier" not in chain and "BSM2 Full Plant" not in chain:
+                    propose_edit("add", "Primary Clarifier", reason="Add Primary Clarifier to reduce particulate COD/TSS load.", priority=84)
+
         else:
             if not params_already_optimized:
                 parametric_causes.append(v)
@@ -329,7 +362,7 @@ def diagnose_simulation(
         "SIM-ORDER-001", "RES-CHEM-001", "RES-SKILL-001", "SIM-COAG-001",
         "SIM-MEM-PUMP", "SIM-MEM-FOUL-TURB", "SIM-MEM-FOUL-FE", "SIM-ADS-FOUL",
         "SIM-IX-FOUL", "SIM-AOP-UVT", "SIM-UV-TURB", "RES-BRINE-001",
-        "WQ-DISINF-UNIT", "WQ-DBP-001", "RES-FOOTPRINT-001",
+        "WQ-DISINF-UNIT", "WQ-DBP-001", "RES-FOOTPRINT-001", "SIM-WW-CLARIFIER",
     }
     has_blocking_structural = any(v.get("code") in hard_structural_codes for v in violations)
 
